@@ -1,9 +1,9 @@
 require 'socket'
 
-# global sequence number
+# Global sequence number
 $seqno = 32
 
-# mutex used to synchronize global sequence number
+# Mutex used to synchronize global sequence number
 $mutex = Mutex.new
 
 # Open TCP socket connection to bloomberg server
@@ -11,7 +11,7 @@ $mutex = Mutex.new
 #mpfSocket = TCPSocket::new( "160.43.166.170", 23876 )
 mpfSocket = TCPSocket::new( "127.0.0.1", 2000 )
 
-# increment the global sequence number.
+# Increment the global sequence number.
 def get_next_seq_no
   $mutex.synchronize do
     if $seqno == 127
@@ -23,47 +23,47 @@ def get_next_seq_no
   end
 end
 
-# compute LRC
+# Compute LRC
 def compute_lrc mpfPacket
   mpfPacket.byteslice(1, mpfPacket.bytesize-1).bytes.inject { |a,b| a ^ b }
 end
 
-# print mpf packet in hex format
+# Print mpf packet in hex format
 def print_mpf_packet mpfPacket
   mpfPacket.bytes { |c| print c.to_s(16), ' ' }
   puts
 end
 
-# send heartbeats to bb every 1 minute
+# Send heartbeats to bb every 1 minute
 heartbeatThread = Thread.new do
   puts "Started heartbeat thread..."
   loop do
     # Format a Type 5 MPF packet...
-    type5Packet = [ 0x02,         # start of transmission
-                    0x25,         # packet type
-                    get_next_seq_no, # sequence number
-                    " ",          # reserved for future use
-                    "IDCO",       # broker bank code
-                    0x03          # end of transmission
-                  ].pack("cccAA*c")
+    type5Packet = [ 0x02,             # start of transmission
+                    0x25,             # packet type
+                    get_next_seq_no,  # sequence number
+                    0x20,             # reserved for future use
+                    "IDCO",           # broker bank code
+                    0x03              # end of transmission
+                  ].pack("ccccA*c")
 
     # Compute LRC
     lrc = compute_lrc( type5Packet )
 
     # Append LRC byte to the MPF packet
     type5Packet << lrc
+    print "=> "
     print_mpf_packet type5Packet
 
     # Send the MPF packet
     mpfSocket.send( type5Packet, 0 )
-    resp = mpfSocket.recv( 1024 )
-    puts "<= #{resp}"    
 
+    # Sleep for a minute
     sleep(10)
   end
 end
 
-# send prices to bb every 1 minute
+# Send prices to bb every 1 minute
 priceThread = Thread.new do
   puts "Started price thread..."
   loop do
@@ -71,91 +71,93 @@ priceThread = Thread.new do
     type2Packet = [ 0x02,               # start of transmission 
                     0x22,               # packet type
                     get_next_seq_no,    # sequence number
-                    "82",               # record type - funds
+                    '82',               # record type - funds
                     "NYCIDCO",          # source id
                     "02:30:00",         # time in HH:MM:SS GMT
-                    4,                  # security identifier type - ticker symbol
+                    '4',                # security identifier type - ticker symbol
                     "GOOG".ljust(12),   # security identifier
-                    1,                  # instances
-                    "T",                # transaction type - Trade
+                    '01',               # instances
+                    'T',                # transaction type - Trade
                     "600.00".rjust(14), # data
                     0x30,               # condition code
                     0x03                # end of transmission
-                  ].pack("cccA2A7A8cA12cAA14cc")
+                  ].pack("cccA2A7A8AA12A2AA14cc")
     
     # Compute LRC
     lrc = compute_lrc( type2Packet )
 
     # Append LRC byte to the MPF packet
     type2Packet << lrc
+    print "=> "
     print_mpf_packet type2Packet
     
     # Send the MPF packet
     mpfSocket.send( type2Packet, 0 )
-    resp = mpfSocket.recv( 1024 )
-    puts "<= #{resp}"    
-    
-    sleep(1)
+
+    # sleep for a minute
+    sleep(10)
   end
 end
-   
+
+# Read response packets from bloomberg server
+readerThread = Thread.new do
+  mpfPacket = nil
+  mpfState = :ExpectingSTX
+  loop do
+  	# Read the responses
+  	resp = mpfSocket.recv( 64 )
+  	if resp.length == 0 #EOF
+  		break
+  	end
+  	i = 0
+  	until i == resp.bytesize
+  		case mpfState
+  			when :ExpectingSTX # Start of transmission
+  				if resp.getbyte(i) == 0x02
+  					mpfPacket = String.new
+  					mpfState = :ExpectingETX
+  				else
+  					puts "Error: MPF protocol violated. Expecting <STX>, received " + resp[i]
+  					break
+  				end
+
+  			when :ExpectingETX
+  				if resp.getbyte(i) == 0x03
+  					mpfState = :ExpectingLRC
+  				end
+
+  			when :ExpectingLRC
+  			  # verify lrc
+  			  mylrc = compute_lrc(mpfPacket)
+  			  if resp.getbyte(i) == mylrc
+  			    puts "LRC Passed!!"
+  					arr = mpfPacket.unpack("cccc")
+  					p arr
+  					if arr[1] == 0x06
+  					  # positive acknowledgement
+  					  puts "ACK!"
+					  elsif arr[1] == 0x15
+					    # negative acknowledgement
+					    puts "NAK!"
+				    else
+    					puts "Error: MPF protocol violated. Expecting <ACK> or <NAK>, received " + arr[1]
+  					end
+  					mpfState = :ExpectingSTX
+			    else
+  					puts "Error: LRC Failed!!. #{resp.getbyte(i)} != #{mylrc}"
+  					break
+          end
+  		end # case 
+  		mpfPacket += resp[i]
+  		i += 1
+  	end #until i == resp.bytesize
+  end # read loop
+end
+
+# Wait for threads to run
 heartbeatThread.join()
 priceThread.join()
-
-=begin
-# read response messages from bloomberg server
-mpfMessage = nil
-mpfState = :ExpectingFrameStart
-payloadSizeBytes = 0
-done = false
-while !done
-	# Read the MPF messages
-	mpfResponse = mpfSocket.recv( 4*1024 )
-	puts mpfResponse
-	if mpfResponse.length == 0 #EOF
-		break
-	end
-	i = 0
-	until i == mpfResponse.bytesize
-		case mpfState
-			when :ExpectingFrameStart
-				if mpfResponse.getbyte(i) == 4
-					puts "MPF Message Begin"
-					mpfMessage = String.new
-					mpfState = :ExpectingProtocolSignature
-				else
-					puts "Error: MPF protocol violated. Expecting frame start, received " + mpfResponse[i]
-					break
-				end
-		
-			when :ExpectingProtocolSignature
-				if mpfResponse.getbyte(i) == 32
-					payloadSizeBytes = 0
-					mpfState = :ExpectingPayloadSize
-				else
-					puts "Error: MPF protocol violated. Expecting protocol signature, received " + mpfResponse[i]
-					break
-				end
-		
-			when :ExpectingPayloadSize
-				payloadSizeBytes += 1
-				if payloadSizeBytes == 4
-					mpfState = :ExpectingFrameEnd
-				end
-			
-			when :ExpectingFrameEnd
-				if mpfResponse.getbyte(i) == 3
-					puts "MPF Message End"
-					payload = mpfMessage.unpack("ccNA*")[3]
-					puts payload
-					mpfState = :ExpectingFrameStart
-				end
-		end
-		mpfMessage += mpfResponse[i]
-		i += 1
-	end
-end
-=end
+readerThread.join()
 
 # Close the socket
 mpfSocket.close
