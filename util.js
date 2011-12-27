@@ -76,3 +76,31 @@ exports.computeLRC = function computeLRC(buf, start, end) {
   }
   return lrc;
 }
+
+/*
+ * right justify
+ */
+exports.rjust = function rjust(val, ch, num) {
+  var re = new RegExp(".{" + num + "}$");
+  var pad = "";
+  if (!ch) ch = " ";
+  do  {
+    pad += ch;
+  } while(pad.length < num);
+  
+  return re.exec(pad + val)[0];
+}
+
+/*
+ * pad right
+ */
+exports.ljust = function ljust(val, ch, num){
+  var re = new RegExp("^.{" + num + "}");
+  var pad = "";
+  if (!ch) ch = " ";
+  do {
+    pad += ch;
+  } while (pad.length < num);
+ 
+  return re.exec(val + pad)[0];
+}

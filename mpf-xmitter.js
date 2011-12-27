@@ -63,10 +63,32 @@ mpfConnection.addListener("end", function () {
 });
 
 /*
+ * Increment the global sequence number.
+ */
+var seqno = 32;
+function nextSeqNo() {
+   if (seqno == 127) {
+     // wrap around to 32
+     seqno = 32;
+   }
+
+   return ++seqno;
+}
+
+/*
  * sends heartbeat packet to mpf server
  */
 function sendHeartbeat () {
-  buf = mpf.createType5Packet(33, "IDCO");
+  buf = mpf.createType5Packet(nextSeqNo(), "IDCO");
+  console.log("sending heartbeat packet => " + buf.toString());
+  mpfConnection.write(buf);
+}
+
+/*
+ * sends type 2 packet to mpf server
+ */
+function sendPrices() {
+  buf = mpf.createType2Packet(nextSeqNo(), "IDCO");
   console.log("sending heartbeat packet => " + buf.toString());
   mpfConnection.write(buf);
 }
@@ -85,4 +107,5 @@ mpfEventEmitter.addListener("NewPacket", function(buf) {
   else {
     console.log("Error: MPF protocol violated. Expecting <ACK> or <NAK>, received " + buf[1]);
   }
+  sendPrices();
 });
