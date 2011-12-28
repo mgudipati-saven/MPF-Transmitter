@@ -5,8 +5,10 @@ var util = require('./util'),
 
 	MPF_FRAME_START = exports.MPF_FRAME_START = 0x02, // start of transmission
 	MPF_FRAME_END = exports.MPF_FRAME_END = 0x03, // end of transmission
-	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25 // packet type 5
-	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22 // packet type 2
+	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25, // packet type 5
+	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22, // packet type 2
+	MPF_PACKET_TYPE_ACK = exports.MPF_PACKET_TYPE_ACK = 0x06, // positive acknowledgement packet
+	MPF_PACKET_TYPE_NAK = exports.MPF_PACKET_TYPE_NAK = 0x15; // negative acknowledgement packet
 	
 /**
  * createType5Packet
@@ -14,7 +16,7 @@ var util = require('./util'),
  *
  * @param       int     sequence number
  * @param       string  banker code
- * @return      buffer  heartbeat message
+ * @return      buffer  heartbeat packet
  * @access      public
  */
 exports.createType5Packet = function createType5Packet (seqno, code) {
@@ -34,11 +36,18 @@ exports.createType5Packet = function createType5Packet (seqno, code) {
 
 /**
  * createType2Packet
- * Creates an mpf packet of type 5 for prices.
+ * Creates an mpf packet of type 2 for prices.
  *
  * @param       int     sequence number
  * @param       string  banker code
- * @return      buffer  heartbeat message
+ * @param       string  banker code
+ * @param       string  banker code
+ * @param       string  banker code
+ * @param       string  banker code
+ * @param       string  banker code
+ * @param       string  banker code
+ * @param       string  banker code
+ * @return      buffer  type 2 packet
  * @access      public
  */
 exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, time, idtype, id, num, data, cond) {
@@ -64,6 +73,48 @@ exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, t
   
   // compute lrc
   buf[offset] = util.computeLRC( buf, 1, offset-1 );
+  
+	return buf;
+}
+
+/**
+ * createACKPacket
+ * Creates an mpf packet of type <ACK> for positive acknowledgement.
+ *
+ * @param       int     sequence number
+ * @return      buffer  positive acknowledgement packet
+ * @access      public
+ */
+exports.createACKPacket = function createACKPacket (seqno) {
+  buf = new Buffer(5);
+  buf[0] = MPF_FRAME_START;       // start of transmission
+  buf[1] = MPF_PACKET_TYPE_ACK;   // packet type
+  buf[2] = seqno;                 // sequence number
+  buf[3] = MPF_FRAME_END;         // end of transmission
+  
+  // compute lrc
+  buf[4] = util.computeLRC( buf, 1, 3 );
+  
+	return buf;
+}
+
+/**
+ * createNAKPacket
+ * Creates an mpf packet of type <NAK> for negative acknowledgement.
+ *
+ * @param       int     sequence number
+ * @return      buffer  negative acknowledgement packet
+ * @access      public
+ */
+exports.createNAKPacket = function createNAKPacket (seqno) {
+  buf = new Buffer(5);
+  buf[0] = MPF_FRAME_START;       // start of transmission
+  buf[1] = MPF_PACKET_TYPE_NAK;   // packet type
+  buf[2] = seqno;                 // sequence number
+  buf[3] = MPF_FRAME_END;         // end of transmission
+  
+  // compute lrc
+  buf[4] = util.computeLRC( buf, 1, 3 );
   
 	return buf;
 }

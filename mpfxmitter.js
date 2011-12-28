@@ -8,17 +8,15 @@ var net = require('net'),
 var eventEmitter = new events.EventEmitter();
   
 // mpf connection
-var mpfConnection = net.createConnection(2000, "127.0.0.1");
-
-/* 
- * mpf connection handlers
- */
-mpfConnection.addListener("connect", function () {
+var mpfConnection = net.createConnection(2000, "127.0.0.1", function () {
   console.log("connection is established with mpf server...");
   
   setInterval(sendHeartbeat, 1000 * 60);
 });
 
+/* 
+ * mpf connection handlers
+ */
 // mpf message deserialization states...
 var EXPECTING_MPF_FRAME_START = 1,
   EXPECTING_MPF_FRAME_END = 2,
