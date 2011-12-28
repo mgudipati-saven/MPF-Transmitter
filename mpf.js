@@ -41,24 +41,29 @@ exports.createType5Packet = function createType5Packet (seqno, code) {
  * @return      buffer  heartbeat message
  * @access      public
  */
-exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, bcode, time, idtype, secid, data, cond) {
-  buf = new Buffer(53);
+exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, time, idtype, id, num, data, cond) {
+  buf = new Buffer(38 + 15 * num);
   buf[0] = MPF_FRAME_START;                   // start of transmission
   buf[1] = MPF_PACKET_TYPE_2;                 // packet type
   buf[2] = seqno;                             // sequence number
-  buf.write('80', 3, 2, 'ascii');             // record type
-  buf.write('NYCTEST', 5, 7, 'ascii');        // source id
-  buf.write('09:51:21', 12, 8, 'ascii')       // time in HH:MM:SS GMT
-  buf.write('2', 20, 1, 'ascii');             // security identifier type
-  buf.write(util.ljust('DE0008408477', ' ', 12), 21, 12, 'ascii'); // security identifier
-  buf.write('01', 33, 2, 'ascii');            // instances
-  buf.write('A', 35, 1, 'ascii');             // transaction type
-  buf.write(util.rjust('396.09', ' ', 14), 36, 14, 'ascii');       // data
-  buf[50] = 0x30;                             // condition code
-  buf[51] = MPF_FRAME_END;                    // end of transmission
+  buf.write(rectype, 3, 2, 'ascii');             // record type
+  buf.write(srcid, 5, 7, 'ascii');        // source id
+  buf.write(time, 12, 8, 'ascii')       // time in HH:MM:SS GMT
+  buf.write(idtype, 20, 1, 'ascii');             // security identifier type
+  buf.write(util.ljust(id, ' ', 12), 21, 12, 'ascii'); // security identifier
+  buf.writeInt16BE(num, 33);
+  //buf.write('01', 33, 2, 'ascii');            // instances
+  var offset = 35;
+  for (var item in data) {
+    buf.write(item, offset++, 1, 'ascii');             // transaction type
+    buf.write(util.rjust(data[item], ' ', 14), offset, 14, 'ascii');       // data
+    offset += 14;
+  }
+  buf[offset++] = cond;                             // condition code
+  buf[offset++] = MPF_FRAME_END;                    // end of transmission
   
   // compute lrc
-  buf[52] = util.computeLRC( buf, 1, 51 );
+  buf[offset] = util.computeLRC( buf, 1, offset-1 );
   
 	return buf;
 }

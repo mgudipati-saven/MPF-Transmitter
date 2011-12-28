@@ -22,7 +22,8 @@ var net = require('net'),
   
   // List of CTF commands
   ctfCommandList = [ 
-		"5022=LoginUser|5028=pfcanned|5029=cypress|5026=1",
+		"5022=LoginUser|5028=tamsupport|5029=bgood2me|5026=1",
+		//"5022=LoginUser|5028=pfcanned|5029=cypress|5026=1",
 		//"5022=LoginUser|5028=plusserver|5029=plusserver|5026=1",
 		//"5022=ListAdministrationInfo|5026=2",
 		//"5022=ListSystemPermission|5026=3",
@@ -73,9 +74,9 @@ var net = require('net'),
   ctfMessageEmitter = new events.EventEmitter();
 
   // ctf connection
-  client = net.createConnection(4004, "trialdata.interactivedata-rts.com"); // 328
+  //client = net.createConnection(4004, "trialdata.interactivedata-rts.com"); // 328
   //client = net.createConnection(4011, "trialdata.interactivedata-rts.com"); // 941
-  //client = net.createConnection(4001, "198.190.11.26");
+  client = net.createConnection(4001, "198.190.11.31");
 
 /* 
 * ctf connection handlers
