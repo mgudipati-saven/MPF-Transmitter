@@ -2,7 +2,6 @@ var net = require('net'),
   mpf = require('./mpf');
 
 var server = net.createServer(function (stream) {
-  
   stream.addListener("data", function (data) {
     console.log("received => " + data.toString());
     
