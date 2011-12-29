@@ -52,24 +52,28 @@ exports.createType5Packet = function createType5Packet (seqno, code) {
  */
 exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, time, idtype, id, num, data, cond) {
   buf = new Buffer(38 + 15 * num);
-  buf[0] = MPF_FRAME_START;                   // start of transmission
-  buf[1] = MPF_PACKET_TYPE_2;                 // packet type
-  buf[2] = seqno;                             // sequence number
-  buf.write(rectype, 3, 2, 'ascii');             // record type
-  buf.write(srcid, 5, 7, 'ascii');        // source id
-  buf.write(time, 12, 8, 'ascii')       // time in HH:MM:SS GMT
-  buf.write(idtype, 20, 1, 'ascii');             // security identifier type
-  buf.write(util.ljust(id, ' ', 12), 21, 12, 'ascii'); // security identifier
+
+  var offset = 0;
+  buf[offset++] = MPF_FRAME_START;                                    // start of transmission
+  buf[offset++] = MPF_PACKET_TYPE_2;                                  // packet type
+  buf[offset++] = seqno;                                              // sequence number
+  buf.write(rectype, offset, 2, 'ascii');                             // record type
+  offset += 2;
+  buf.write(srcid, offset, 7, 'ascii');                               // source id
+  offset += 7
+  buf.write(time, offset, 8, 'ascii')                                 // time in HH:MM:SS GMT
+  offset += 8;
+  buf.write(idtype, offset++, 1, 'ascii');                            // security identifier type
+  buf.write(util.ljust(id, ' ', 12), offset, 12, 'ascii');            // security identifier
   buf.writeInt16BE(num, 33);
-  //buf.write('01', 33, 2, 'ascii');            // instances
-  var offset = 35;
+  offset += 12;
   for (var item in data) {
-    buf.write(item, offset++, 1, 'ascii');             // transaction type
-    buf.write(util.rjust(data[item], ' ', 14), offset, 14, 'ascii');       // data
+    buf.write(item, offset++, 1, 'ascii');                            // transaction type
+    buf.write(util.rjust(data[item], ' ', 14), offset, 14, 'ascii');  // data
     offset += 14;
   }
-  buf[offset++] = cond;                             // condition code
-  buf[offset++] = MPF_FRAME_END;                    // end of transmission
+  buf[offset++] = cond;                                               // condition code
+  buf[offset++] = MPF_FRAME_END;                                      // end of transmission
   
   // compute lrc
   buf[offset] = util.computeLRC( buf, 1, offset-1 );

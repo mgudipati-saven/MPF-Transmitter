@@ -35,7 +35,7 @@ exports.serialize = function serialize (str) {
 
 	ctfmsg[ctfmsg.length-1] = FRAME_END;
 
-	//console.log("CTF Message: " + ctfmsg);
+	console.log("CTF Message: " + ctfmsg);
 	return ctfmsg;
 }
 

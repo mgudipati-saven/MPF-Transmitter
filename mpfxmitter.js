@@ -1,9 +1,9 @@
 var net = require('net'),
-  events = require('events'),
-  iniparser = require('../src/node_modules/iniparser/lib/node-iniparser'),
-  mpf = require('./mpf'),
-  util = require('./util'),
-  ctf = require('./ctf');
+    events = require('events'),
+    iniparser = require('../src/node_modules/iniparser/lib/node-iniparser'),
+    mpf = require('./mpf'),
+    util = require('./util'),
+    ctf = require('./ctf');
 
 // parse ini configuration file
 var config = iniparser.parseSync('./config.ini');
@@ -11,17 +11,44 @@ var config = iniparser.parseSync('./config.ini');
 
 // ctf configuration
 var CTF_HOST = config.CTF.Host,
-  CTF_PORT = config.CTF.Port,
-  CTF_USERID = config.CTF.UserID,
-  CTF_PASSWORD = config.CTF.Password;
+    CTF_PORT = config.CTF.Port,
+    CTF_USERID = config.CTF.UserID,
+    CTF_PASSWORD = config.CTF.Password;
 
 // mpf configuration
 var MPF_HOST = config.MPF.Host,
-  MPF_PORT = config.MPF.Port,
-  MPF_HEARTBEAT_INTERVAL = config.MPF.HeartbeatInterval,
-  MPF_BANK_CODE = config.MPF.BankCode,
-  MPF_CITY_CODE = config.MPF.CityCode;
-  
+    MPF_PORT = config.MPF.Port,
+    MPF_HEARTBEAT_INTERVAL = config.MPF.HeartbeatInterval,
+    MPF_BANK_CODE = config.MPF.BankCode,
+    MPF_CITY_CODE = config.MPF.CityCode,
+    exchanges = config.MPF.Exchanges.split(","),
+    jsonFieldMap = config.FieldMap;
+    
+// master securities watchlist
+var securitiesWatchList = new Array();
+var jsonSecurities = {};
+exchanges.forEach(function(exch, pos) {
+  var section = config[exch];
+  if (section) {
+    //console.log(section);
+    if (section.Securities) {
+      section.Securities.split(",").forEach(function(security, pos) {
+        //console.log(config[security]);
+        var sym = config[security].IDCTicker;
+        if (sym) {
+          securitiesWatchList.push(sym);
+          jsonSecurities[sym] = { "BBTicker": security, 
+                                  "IDType": config[security].IDType,
+                                  "RecordType": config[security].RecordType,
+                                  "TransactionTypes": config[security].TransactionTypes.split(",")
+                                };
+          console.log(jsonSecurities);
+        }
+      });
+    }
+  }
+});
+
 // event emitter
 var eventEmitter = new events.EventEmitter();
   
@@ -37,8 +64,8 @@ var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
  */
 // mpf message deserialization states...
 var EXPECTING_MPF_FRAME_START = 1,
-  EXPECTING_MPF_FRAME_END = 2,
-  EXPECTING_MPF_LRC = 3;  
+    EXPECTING_MPF_FRAME_END = 2,
+    EXPECTING_MPF_LRC = 3;  
 
 mpfConnection.addListener("data", function (chunk, mpfState, mpfBuf, index) {
   console.log("data is received from mpf server <= " + chunk.toString('hex'));
@@ -126,22 +153,38 @@ function sendHeartbeat () {
 /*
  * sends type 2 packet to mpf server
  */
-function sendPrices(json) {
-  var arr = new Array();
-  if (json['5'] && json['8'] && json['10']) {
-    arr['T'] = json['8'];
-    arr['A'] = json['10'];
-    buf = mpf.createType2Packet(nextSeqNo(), 
-                                '80',
-                                'NYCTEST',
-                                '09:51:21',
-                                '4',
-                                json['5'],
-                                2,
-                                arr,
-                                0x30);
-    console.log("sending type 2 packet => " + buf.toString());
-    mpfConnection.write(buf);
+function sendPrices(jsonmsg) {
+  var srcid = jsonmsg['4'],
+      sym = jsonmsg['5'];
+
+  if ( srcid && sym ) {
+    // trade or quote message,  check if on our watchlist
+    if (jsonSecurities[sym]) {
+      // create a data array for the required transaction types
+      var arr = new Array(),
+          arrlen = 0;
+      jsonSecurities[sym].TransactionTypes.forEach(function(type, pos) {
+        var field = jsonFieldMap[type];
+        if (field && jsonmsg[field]) {
+          arr[type] = jsonmsg[field];
+          arrlen++;
+        }
+      });
+      console.log("Transactions = " + arrlen);
+      if (arrlen != 0) {
+        buf = mpf.createType2Packet(nextSeqNo(), 
+                                    jsonSecurities[sym].RecordType,
+                                    MPF_CITY_CODE+MPF_BANK_CODE,
+                                    '09:51:21',
+                                    jsonSecurities[sym].IDType,
+                                    sym,
+                                    arrlen,
+                                    arr,
+                                    0x30);
+        console.log("sending type 2 packet => " + buf.toString());
+        mpfConnection.write(buf);
+      }
+    } 
   }
 }
 
@@ -161,8 +204,7 @@ var ctfCommandList = [
 	//"5022=SelectUserTokens|5035=5|5035=308|5035=378|5026=9",
 	//"5022=QuerySnap|4=941|5=E:TCS.EQ|5026=11",
 	//"5022=Subscribe|4=741|5026=12",
-	"5022=Subscribe|4=741|5026=12",
-	//"5022=QuerySnapAndSubscribe|4=941|5=E:TCS.EQ|5026=22",
+	//"5022=Subscribe|4=741|5026=12",
 ];
 
 ctfConnection.addListener("connect", function () {
@@ -172,14 +214,21 @@ ctfConnection.addListener("connect", function () {
 	ctfCommandList.forEach(function(cmd, pos) {
 		ctfConnection.write(ctf.serialize(cmd));
 	});
+	
+	// subscribe to the watchlist
+	securitiesWatchList.forEach(function(sym, pos) {
+	  var cmd = "5022=QuerySnapAndSubscribe|4=741|5="+sym+"|5026="+10+pos;
+		ctfConnection.write(ctf.serialize(cmd));
+	});
+	
 });
 
 // ctf message parser states...
 var EXPECTING_CTF_FRAME_START = 1,
-  EXPECTING_CTF_PROTOCOL_SIGNATURE = 2,
-  EXPECTING_CTF_PAYLOAD_SIZE = 3,
-  EXPECTING_CTF_PAYLOAD = 4,
-  EXPECTING_CTF_FRAME_END = 5;
+    EXPECTING_CTF_PROTOCOL_SIGNATURE = 2,
+    EXPECTING_CTF_PAYLOAD_SIZE = 3,
+    EXPECTING_CTF_PAYLOAD = 4,
+    EXPECTING_CTF_FRAME_END = 5;
 
 // ctf message parsing...
 var ctfState = EXPECTING_CTF_FRAME_START, // current ctf state
@@ -266,5 +315,3 @@ eventEmitter.addListener("NewCTFMessage", function(buf) {
     sendPrices(json);
   }
 });
-
-
