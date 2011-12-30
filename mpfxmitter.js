@@ -7,8 +7,7 @@ var net = require('net'),
 
 // parse ini configuration file
 var config = iniparser.parseSync('./config.ini');
-//console.log(config.ctf.host + ":" + config.ctf.port);
-
+console.log(config);
 // ctf configuration
 var CTF_HOST = config.CTF.Host,
     CTF_PORT = config.CTF.Port,
@@ -30,10 +29,8 @@ var jsonSecurities = {};
 exchanges.forEach(function(exch, pos) {
   var section = config[exch];
   if (section) {
-    //console.log(section);
     if (section.Securities) {
       section.Securities.split(",").forEach(function(security, pos) {
-        //console.log(config[security]);
         var sym = config[security].IDCTicker;
         if (sym) {
           securitiesWatchList.push(sym);
@@ -42,7 +39,6 @@ exchanges.forEach(function(exch, pos) {
                                   "RecordType": config[security].RecordType,
                                   "TransactionTypes": config[security].TransactionTypes.split(",")
                                 };
-          console.log(jsonSecurities);
         }
       });
     }
@@ -116,15 +112,17 @@ mpfConnection.addListener("end", function () {
 
 // emit an event when a new packet arrives from mpf server
 eventEmitter.addListener("NewMPFPacket", function(buf) {
-	if (buf[1] == 0x06) {
+  var mpfmsg = mpf.parse(buf);
+  
+	if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_ACK ) {
 	  // positive acknowledgement
     console.log("ACK!!");
-	} else if (buf[1] == 0x15) {
+	} else if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_NAK ) {
     // negative acknowledgement
     console.log("NAK!!");
 	}
   else {
-    console.log("Error: MPF protocol violated. Expecting <ACK> or <NAK>, received " + buf[1]);
+    console.log("Error: MPF Packet type received: " + jsonPacket.PacketType);
   }
 });
 
@@ -146,7 +144,7 @@ function nextSeqNo() {
  */
 function sendHeartbeat () {
   buf = mpf.createType5Packet(nextSeqNo(), MPF_BANK_CODE);
-  console.log("sending heartbeat packet => " + buf.toString());
+  console.log("sending heartbeat packet of size " + buf.length + " => <" + buf.toString() + ">");
   mpfConnection.write(buf);
 }
 
@@ -155,9 +153,11 @@ function sendHeartbeat () {
  */
 function sendPrices(jsonmsg) {
   var srcid = jsonmsg['4'],
-      sym = jsonmsg['5'];
+      sym = jsonmsg['5'],
+      time = jsonmsg['16'];
 
-  if ( srcid && sym ) {
+  if ( srcid && sym && time ) {
+    console.log(jsonmsg);
     // trade or quote message,  check if on our watchlist
     if (jsonSecurities[sym]) {
       // create a data array for the required transaction types
@@ -170,18 +170,17 @@ function sendPrices(jsonmsg) {
           arrlen++;
         }
       });
-      console.log("Transactions = " + arrlen);
       if (arrlen != 0) {
         buf = mpf.createType2Packet(nextSeqNo(), 
                                     jsonSecurities[sym].RecordType,
                                     MPF_CITY_CODE+MPF_BANK_CODE,
-                                    '09:51:21',
+                                    new Date(parseInt(time)).format("HH:MM:ss"),
                                     jsonSecurities[sym].IDType,
                                     sym,
                                     arrlen,
                                     arr,
                                     0x30);
-        console.log("sending type 2 packet => " + buf.toString());
+        console.log("sending type 2 packet of size " + buf.length + " => <" + buf.toString() + ">");
         mpfConnection.write(buf);
       }
     } 
@@ -307,11 +306,10 @@ ctfConnection.addListener("end", function () {
 eventEmitter.addListener("NewCTFMessage", function(buf) {
   //console.log("NewCTFMessage => " + buf.toString());
 
-  var json = ctf.toJSONObject(buf.toString());
-  console.log(json);
+  var ctfmsg = ctf.toJSONObject(buf.toString());
   
-  if (json['4']) {
+  if (ctfmsg['4']) {
     // quotes...
-    sendPrices(json);
+    sendPrices(ctfmsg);
   }
 });

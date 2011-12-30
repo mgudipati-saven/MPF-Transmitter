@@ -122,3 +122,17 @@ exports.createNAKPacket = function createNAKPacket (seqno) {
   
 	return buf;
 }
+
+/**
+ * parse
+ * Parses an MPF Packet.
+ *
+ * @param       buffer  mpf packet
+ * @return      json    json formatted mpf data
+ * @access      public
+ */
+exports.parse = function parse (buf) {
+  json = { "PacketType": buf[1], "SeqNo": buf[2] };
+
+  return json;
+}
