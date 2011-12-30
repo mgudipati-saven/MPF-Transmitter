@@ -144,7 +144,7 @@ function nextSeqNo() {
  */
 function sendHeartbeat () {
   buf = mpf.createType5Packet(nextSeqNo(), MPF_BANK_CODE);
-  console.log("sending heartbeat packet of size " + buf.length + " => <" + buf.toString() + ">");
+  console.log("sending heartbeat packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
   mpfConnection.write(buf);
 }
 
@@ -180,7 +180,7 @@ function sendPrices(jsonmsg) {
                                     arrlen,
                                     arr,
                                     0x30);
-        console.log("sending type 2 packet of size " + buf.length + " => <" + buf.toString() + ">");
+        console.log("sending type 2 packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
         mpfConnection.write(buf);
       }
     } 
