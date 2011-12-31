@@ -58,52 +58,12 @@ var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
 /* 
  * mpf connection handlers
  */
-// mpf message deserialization states...
-var EXPECTING_MPF_FRAME_START = 1,
-    EXPECTING_MPF_FRAME_END = 2,
-    EXPECTING_MPF_LRC = 3;  
+var laststate = mpf.MPF_FRAME_START,
+    lastarr = new Array();
 
-mpfConnection.addListener("data", function (chunk, mpfState, mpfBuf, index) {
+mpfConnection.addListener("data", function (chunk) {
   console.log("data is received from mpf server <= " + chunk.toString('hex'));
-  
-  if (typeof mpfState == 'undefined') {
-    mpfState = EXPECTING_MPF_FRAME_START;
-  }
-  
-  for (var i = 0; i < chunk.length; i++) {
-    switch (mpfState) {
-      case EXPECTING_MPF_FRAME_START:
-        if (chunk[i] == mpf.MPF_FRAME_START) {
-          mpfState = EXPECTING_MPF_FRAME_END;
-          mpfBuf = new Buffer(4);
-          index = 0;
-        } else {
-          console.log("Error: expecting mpf start of transmission, received " + chunk[i]);
-          // TODO
-        }
-      break;
-      
-      case EXPECTING_MPF_FRAME_END:
-        if (chunk[i] == mpf.MPF_FRAME_END) {
-          mpfState = EXPECTING_MPF_LRC;
-        }        
-      break;
-
-      case EXPECTING_MPF_LRC:
-        lrc = util.computeLRC(mpfBuf, 1, mpfBuf.length-1);
-        if (chunk[i] == lrc) {
-          mpfState = EXPECTING_MPF_FRAME_START;
-          eventEmitter.emit("NewMPFPacket", mpfBuf);
-        } else {
-          console.log("Error: LRC Failed!! " + lrc + " != " + chunk[i]);
-          // TODO
-        }        
-      break;
-    }
-    
-    // copy the byte into mpf buffer
-    mpfBuf[index++] = chunk[i];
-  }
+  laststate = mpf.pack(chunk, laststate, lastarr, eventEmitter);
 });
 
 mpfConnection.addListener("end", function () {
@@ -113,7 +73,7 @@ mpfConnection.addListener("end", function () {
 // emit an event when a new packet arrives from mpf server
 eventEmitter.addListener("NewMPFPacket", function(buf) {
   var mpfmsg = mpf.parse(buf);
-  
+  console.log(mpfmsg);
 	if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_ACK ) {
 	  // positive acknowledgement
     console.log("ACK!!");
@@ -122,7 +82,7 @@ eventEmitter.addListener("NewMPFPacket", function(buf) {
     console.log("NAK!!");
 	}
   else {
-    console.log("Error: MPF Packet type received: " + jsonPacket.PacketType);
+    console.log("Error: MPF Packet type received: " + mpfmsg.PacketType);
   }
 });
 

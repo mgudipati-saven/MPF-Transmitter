@@ -1,15 +1,35 @@
 var net = require('net'),
-  mpf = require('./mpf');
+    events = require('events'),
+    mpf = require('./mpf');
+
 
 var server = net.createServer(function (stream) {
-  stream.addListener("data", function (data) {
-    console.log("received => " + data.toString());
+  // event emitter
+  var eventEmitter = new events.EventEmitter();
+
+  // emit an event when a new packet arrives from a client
+  eventEmitter.addListener("NewMPFPacket", function(buf) {
+    var mpfmsg = mpf.parse(buf);
+    console.log(mpfmsg);  
     
     // send ack
-    buf = mpf.createACKPacket(1);
-    console.log("sending ack packet => " + buf.toString());
-    stream.write(buf);
+    var seqno = mpfmsg.SeqNo;
+    if (seqno) {
+      buf = mpf.createACKPacket(seqno);
+      console.log("sending ack packet => " + buf.toString('hex'));
+      stream.write(buf);
+    }
+  });
+
+  // mpf packet state
+  var laststate = mpf.MPF_FRAME_START,
+      lastarr = new Array();
+  
+  stream.addListener("data", function (chunk) {
+    console.log("received => " + chunk.toString('hex'));
+    laststate = mpf.pack(chunk, laststate, lastarr, eventEmitter);    
   });
 }).listen(2000, "127.0.0.1", function() {
     console.log("waiting for connections on port 2000...");
   });
+  

@@ -5,6 +5,7 @@ var util = require('./util'),
 
 	MPF_FRAME_START = exports.MPF_FRAME_START = 0x02, // start of transmission
 	MPF_FRAME_END = exports.MPF_FRAME_END = 0x03, // end of transmission
+	MPF_LRC = 1, // lrc
 	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25, // packet type 5
 	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22, // packet type 2
 	MPF_PACKET_TYPE_ACK = exports.MPF_PACKET_TYPE_ACK = 0x06, // positive acknowledgement packet
@@ -145,7 +146,64 @@ exports.createNAKPacket = function createNAKPacket (seqno) {
  * @access      public
  */
 exports.parse = function parse (buf) {
-  json = { "PacketType": buf[1], "SeqNo": buf[2] };
+  mpfmsg = {};
+  
+  // header
+  if (buf[1]) {
+    mpfmsg['PacketType'] = buf[1];    
+  }
+  if (buf[2]) {
+    mpfmsg['SeqNo'] = buf[2];    
+  }
 
-  return json;
+  return mpfmsg;
+}
+
+/**
+ * pack
+ * Helps packing a complete mpf array from partial stream reads.
+ *
+ * @param       buffer  mpf packet, may be partial
+ * @param       state   state of mpf packet read so far
+ * @param       array   source array to fill
+ * @param       eventEmitter   event emitter
+ * @return      array   array of mpf octets
+ * @access      public
+ */
+exports.pack = function pack (buf, mpfstate, mpfarr, eventEmitter) {
+  for (var i = 0; i < buf.length; i++) {
+    switch (mpfstate) {
+      case MPF_FRAME_START:
+        if (buf[i] == MPF_FRAME_START) {
+          mpfstate = MPF_FRAME_END;
+          mpfarr = new Array();
+        } else {
+          console.log("Error: expecting mpf start of transmission, received " + buf[i]);
+          // TODO
+        }
+      break;
+      
+      case MPF_FRAME_END:
+        if (buf[i] == MPF_FRAME_END) {
+          mpfstate = MPF_LRC;
+        }        
+      break;
+
+      case MPF_LRC:
+        lrc = util.computeLRC(mpfarr, 1, mpfarr.length-1);
+        if (buf[i] == lrc) {
+          eventEmitter.emit("NewMPFPacket", mpfarr);
+          mpfstate = MPF_FRAME_START;
+        } else {
+          console.log("Error: LRC Failed!! " + lrc + " != " + buf[i]);
+          // TODO
+        }        
+      break;
+    }
+    
+    // copy the byte into mpf array
+    mpfarr.push(buf[i]);
+  }
+  
+  return mpfstate;
 }
