@@ -58,12 +58,14 @@ var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
 /* 
  * mpf connection handlers
  */
-var laststate = mpf.MPF_FRAME_START,
-    lastarr = new Array();
 
 mpfConnection.addListener("data", function (chunk) {
+  var laststate = mpf.MPF_FRAME_START,
+      lastarr = new Array();
   console.log("data is received from mpf server <= " + chunk.toString('hex'));
-  laststate = mpf.deserialize(chunk, laststate, lastarr, eventEmitter);
+  laststate = mpf.deserialize(chunk, laststate, lastarr, function (mpfarr) {
+    eventEmitter.emit("NewMPFPacket", mpfarr);
+  });
 });
 
 mpfConnection.addListener("end", function () {

@@ -166,11 +166,11 @@ exports.parse = function parse (buf) {
  * @param       buffer          mpf bytes
  * @param       state           state of mpf packet read so far
  * @param       array           source array to fill
- * @param       eventEmitter    emits an event for each new mpf packet
+ * @param       callback        function to call when a complete mpf packet is ready
  * @return      array           array of mpf octets
  * @access      public
  */
-exports.deserialize = function pack (buf, mpfstate, mpfarr, eventEmitter) {
+exports.deserialize = function pack (buf, mpfstate, mpfarr, cb) {
   for (var i = 0; i < buf.length; i++) {
     switch (mpfstate) {
       case MPF_FRAME_START:
@@ -192,7 +192,10 @@ exports.deserialize = function pack (buf, mpfstate, mpfarr, eventEmitter) {
       case MPF_LRC:
         lrc = util.computeLRC(mpfarr, 1, mpfarr.length-1);
         if (buf[i] == lrc) {
-          eventEmitter.emit("NewMPFPacket", mpfarr);
+          if (cb && typeof(cb) === 'function') {
+              // execute the callback
+              cb(mpfarr);
+          }
           mpfstate = MPF_FRAME_START;
         } else {
           console.log("Error: LRC Failed!! " + lrc + " != " + buf[i]);
