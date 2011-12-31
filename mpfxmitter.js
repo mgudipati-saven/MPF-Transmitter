@@ -63,7 +63,7 @@ var laststate = mpf.MPF_FRAME_START,
 
 mpfConnection.addListener("data", function (chunk) {
   console.log("data is received from mpf server <= " + chunk.toString('hex'));
-  laststate = mpf.pack(chunk, laststate, lastarr, eventEmitter);
+  laststate = mpf.deserialize(chunk, laststate, lastarr, eventEmitter);
 });
 
 mpfConnection.addListener("end", function () {

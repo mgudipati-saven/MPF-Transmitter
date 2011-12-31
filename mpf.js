@@ -160,17 +160,17 @@ exports.parse = function parse (buf) {
 }
 
 /**
- * pack
- * Helps packing a complete mpf array from partial stream reads.
+ * deserialize
+ * deserializes mpf packets from partial byte stream.
  *
- * @param       buffer  mpf packet, may be partial
- * @param       state   state of mpf packet read so far
- * @param       array   source array to fill
- * @param       eventEmitter   event emitter
- * @return      array   array of mpf octets
+ * @param       buffer          mpf bytes
+ * @param       state           state of mpf packet read so far
+ * @param       array           source array to fill
+ * @param       eventEmitter    emits an event for each new mpf packet
+ * @return      array           array of mpf octets
  * @access      public
  */
-exports.pack = function pack (buf, mpfstate, mpfarr, eventEmitter) {
+exports.deserialize = function pack (buf, mpfstate, mpfarr, eventEmitter) {
   for (var i = 0; i < buf.length; i++) {
     switch (mpfstate) {
       case MPF_FRAME_START:

@@ -27,7 +27,7 @@ var server = net.createServer(function (stream) {
   
   stream.addListener("data", function (chunk) {
     console.log("received => " + chunk.toString('hex'));
-    laststate = mpf.pack(chunk, laststate, lastarr, eventEmitter);    
+    laststate = mpf.deserialize(chunk, laststate, lastarr, eventEmitter);    
   });
 }).listen(2000, "127.0.0.1", function() {
     console.log("waiting for connections on port 2000...");
