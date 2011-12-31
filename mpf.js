@@ -70,17 +70,17 @@ exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, t
   buf.write(idtype, offset++, 1, 'ascii');                            // security identifier type
 
   var securityid = util.ljust(id, ' ', 12);
-  console.log("security identifier = <" + securityid + ">");
+  //console.log("security identifier = <" + securityid + ">");
   buf.write(securityid, offset, 12, 'ascii');                         // security identifier
   offset += 12;
 
-  buf.writeInt16BE(num, offset);                                      // number of instances or tansactions
+  buf.write("%02d".printf(num), offset);                              // number of instances or tansactions
   offset += 2;
 
   for (var item in data) {
     buf.write(item, offset++, 1, 'ascii');                            // transaction type
     var val = util.rjust(data[item], ' ', 14);
-    console.log("data for transaction " + item + " = <" + val + ">");
+    //console.log("data for transaction " + item + " = <" + val + ">");
     buf.write(val, offset, 14, 'ascii');                              // data
     offset += 14;
   }
