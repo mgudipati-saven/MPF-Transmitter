@@ -96,6 +96,26 @@ exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, t
 }
 
 /**
+ * createResetPacket
+ * Creates an mpf reset packet of with seqno 32.
+ *
+ * @return      buffer  reset packet
+ * @access      public
+ */
+exports.createResetPacket = function createResetPacket () {
+  buf = new Buffer(5);
+  buf[0] = MPF_FRAME_START;       // start of transmission
+  buf[1] = MPF_PACKET_TYPE_2;     // packet type
+  buf[2] = 32;                    // sequence number
+  buf[3] = MPF_FRAME_END;         // end of transmission
+  
+  // compute lrc
+  buf[4] = util.computeLRC( buf, 1, 3 );
+  
+	return buf;
+}
+
+/**
  * createACKPacket
  * Creates an mpf packet of type <ACK> for positive acknowledgement.
  *

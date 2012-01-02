@@ -22,6 +22,7 @@ var MPF_HOST = config.MPF.Host,
     MPF_PUBLISH_INTERVAL = config.MPF.PublishInterval,
     MPF_WINDOW_SIZE = config.MPF.WindowSize,
     MPF_TIMEOUT = config.MPF.Timeout,
+    MPF_NAK_LIMIT = config.MPF.NakLimit,
     MPF_BANK_CODE = config.MPF.BankCode,
     MPF_CITY_CODE = config.MPF.CityCode,
     exchanges = config.MPF.Exchanges.split(","),
@@ -102,14 +103,19 @@ eventEmitter.addListener("NewMPFPacket", function(buf) {
 function processAck(seqno) {
   console.log("MPF Ack received for packet with seqno " + seqno);
 
-  // cancel timeout
-  clearTimeout(_timeoutId);
-  
-  // adjust the outbox window
-  console.log("window array = " + _windowArr);
-  var inx = _windowArr.indexOf(seqno);
-  _windowArr = _windowArr.splice(++inx);
-  console.log("window array = " + _windowArr);
+  if (seqno == 32) {
+    // reset acknowledged
+    _reset = false;
+  } else {
+    // clear timeout
+    clearTimeout(_timeoutId);
+
+    // adjust the outbox window
+    console.log("window array = " + _windowArr);
+    var inx = _windowArr.indexOf(seqno);
+    _windowArr = _windowArr.splice(++inx);
+    console.log("window array = " + _windowArr);
+  }
   
   // continue publishing
   sendPackets();
@@ -118,21 +124,62 @@ function processAck(seqno) {
 /*
  *
  */
+ var _nakCount = 0;
 function processNak(seqno) {
   console.log("MPF Nak received for packet with seqno " + seqno);
+  
+  // clear timeout
+  clearTimeout(_timeoutId);
+  
+  if (++_nakCount == MPF_NAK_LIMIT) {
+    // nak count exceeded max allowed limit
+    resetSeqNo();
+    sendReset();
+    _nakCount = 0;
+  } else {
+    // adjust the outbox window
+    console.log("window array = " + _windowArr);
+    var inx = _windowArr.indexOf(prevSeqNo(seqno));
+    _windowArr = _windowArr.splice(++inx);
+    console.log("window array = " + _windowArr);
+
+    // retransmit
+    retransmit();
+  }
+}
+
+var _reset = false;
+function sendReset() {
+  // send a reset packet with seqno 32
+  console.log("Sending reset packet");
+  var buf = mpf.createResetPacket();
+  mpfConnection.write(buf);
+  _reset = true;
+}
+
+function resetSeqNo() {
+  _seqno = 32;
 }
 
 /*
  * Increment the global sequence number.
  */
-var seqno = 32;
+var _seqno = 32;
 function nextSeqNo() {
-   if (seqno == 127) {
+   if (_seqno == 127) {
      // wrap around to 32
-     seqno = 32;
+     _seqno = 32;
    }
 
-   return ++seqno;
+   return ++_seqno;
+}
+
+function prevSeqNo(seqno) {
+  if (seqno == 33) {
+    return 127;
+  }
+  
+  return --seqno;
 }
 
 /*
@@ -161,6 +208,10 @@ var _timeoutId = null;
  *
  */
 function sendPackets() {
+  if (_reset) {
+    return;
+  }
+  
   // check window size and inbox for messages
   while ( _windowArr.length < MPF_WINDOW_SIZE && _inboxArr.length != 0 ) {
     if ( sendPrices(_inboxArr.shift()) ) {
@@ -186,13 +237,14 @@ function processTimeout() {
  *
  */
 function retransmit () {
-  // send the packets again
+  // send the packets from outbox again
   _windowArr.forEach(function (seqno, pos) {
-    console.log("retransmitting type 2 packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
+    console.log("retransmitting packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
     mpfConnection.write(_outboxArr[seqno]);
   });
 
-  _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
+  // send more packets, if any
+  sendPackets();
 }
 
 /*
