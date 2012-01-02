@@ -8,6 +8,7 @@ var net = require('net'),
 // parse ini configuration file
 var config = iniparser.parseSync('./config.ini');
 console.log(config);
+
 // ctf configuration
 var CTF_HOST = config.CTF.Host,
     CTF_PORT = config.CTF.Port,
@@ -18,6 +19,9 @@ var CTF_HOST = config.CTF.Host,
 var MPF_HOST = config.MPF.Host,
     MPF_PORT = config.MPF.Port,
     MPF_HEARTBEAT_INTERVAL = config.MPF.HeartbeatInterval,
+    MPF_PUBLISH_INTERVAL = config.MPF.PublishInterval,
+    MPF_WINDOW_SIZE = config.MPF.WindowSize,
+    MPF_TIMEOUT = config.MPF.Timeout,
     MPF_BANK_CODE = config.MPF.BankCode,
     MPF_CITY_CODE = config.MPF.CityCode,
     exchanges = config.MPF.Exchanges.split(","),
@@ -52,7 +56,11 @@ var eventEmitter = new events.EventEmitter();
 var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
   console.log("connection is established with mpf server...");
   
+  // start the heartbeat timer
   setInterval(sendHeartbeat, 1000 * MPF_HEARTBEAT_INTERVAL);
+
+  // start the publish timer
+  //setInterval(sendPackets, 1000 * MPF_PUBLISH_INTERVAL);
 });
 
 /* 
@@ -78,15 +86,40 @@ eventEmitter.addListener("NewMPFPacket", function(buf) {
   console.log(mpfmsg);
 	if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_ACK ) {
 	  // positive acknowledgement
-    console.log("ACK!!");
+    processAck(mpfmsg.SeqNo);
 	} else if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_NAK ) {
     // negative acknowledgement
-    console.log("NAK!!");
+    processNak(mpfmsg.SeqNo);
 	}
   else {
     console.log("Error: MPF Packet type received: " + mpfmsg.PacketType);
   }
 });
+
+/*
+ *
+ */
+function processAck(seqno) {
+  // cancel timeout
+  clearTimeout(_timeoutId);
+  
+  console.log("MPF Ack received for packet with seqno " + seqno);
+  // adjust the outbox window
+  console.log("window array = " + _windowArr);
+  var inx = _windowArr.indexOf(seqno);
+  _windowArr = _windowArr.splice(++inx);
+  console.log("window array = " + _windowArr);
+  
+  // continue publishing
+  
+}
+
+/*
+ *
+ */
+function processNak(seqno) {
+  console.log("MPF Nak received for packet with seqno " + seqno);
+}
 
 /*
  * Increment the global sequence number.
@@ -108,6 +141,35 @@ function sendHeartbeat () {
   buf = mpf.createType5Packet(nextSeqNo(), MPF_BANK_CODE);
   console.log("sending heartbeat packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
   mpfConnection.write(buf);
+}
+
+var _outboxArr = new Array();
+var _windowArr = new Array();
+var _timeoutId = null;
+
+/*
+ *
+ */
+function sendPackets() {
+  // check window size and inbox for messages
+  while ( _windowArr.length < MPF_WINDOW_SIZE && _inboxArr.length != 0 ) {
+    if ( sendPrices(_inboxArr.shift()) ) {
+      // adjust window size after a successful send
+      if (_windowArr.length == MPF_WINDOW_SIZE) {
+        // no more publishing possible, set timeout for an ack or nak
+        console.log("Setting timeout for ack/nak after window size reached 0");
+        _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
+        break;
+      }
+    }
+  }
+}
+
+/*
+ *
+ */
+function processTimeout() {  
+  console.log("MPF Timeout"); 
 }
 
 /*
@@ -133,7 +195,8 @@ function sendPrices(jsonmsg) {
         }
       });
       if (arrlen != 0) {
-        buf = mpf.createType2Packet(nextSeqNo(), 
+        var seqno = nextSeqNo();
+        buf = mpf.createType2Packet(seqno, 
                                     jsonSecurities[sym].RecordType,
                                     MPF_CITY_CODE+MPF_BANK_CODE,
                                     new Date(parseInt(time)).format("HH:MM:ss"),
@@ -144,9 +207,17 @@ function sendPrices(jsonmsg) {
                                     0x30);
         console.log("sending type 2 packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
         mpfConnection.write(buf);
+
+        // push it to outbox for restransmission if needed
+        _outboxArr[seqno] = jsonmsg;
+        
+        // adjust window size
+        _windowArr.push(seqno);
       }
     } 
   }
+  
+  return false;
 }
 
 //
@@ -264,6 +335,9 @@ ctfConnection.addListener("end", function () {
   console.log("ctf server disconnected...");
 });
 
+// global array to collect price messages coming in
+var _inboxArr = new Array();
+
 // emit an event when a new packet arrives from ctf server
 eventEmitter.addListener("NewCTFMessage", function(buf) {
   //console.log("NewCTFMessage => " + buf.toString());
@@ -271,7 +345,11 @@ eventEmitter.addListener("NewCTFMessage", function(buf) {
   var ctfmsg = ctf.toJSONObject(buf.toString());
   
   if (ctfmsg['4']) {
-    // quotes...
-    sendPrices(ctfmsg);
+    // quotes...collect them.
+    _inboxArr.push(ctfmsg);
+    console.log("num price messages = " + _inboxArr.length);
+    
+    // try to publish
+    sendPackets();
   }
 });

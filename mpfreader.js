@@ -7,17 +7,23 @@ var server = net.createServer(function (stream) {
   // event emitter
   var eventEmitter = new events.EventEmitter();
 
+  // window size
+  var windowsize = 7;
+  
   // emit an event when a new packet arrives from a client
   eventEmitter.addListener("NewMPFPacket", function(buf) {
     var mpfmsg = mpf.parse(buf);
     console.log(mpfmsg);  
     
-    // send ack
-    var seqno = mpfmsg.SeqNo;
-    if (seqno) {
-      buf = mpf.createACKPacket(seqno);
-      console.log("sending ack packet => " + buf.toString('hex'));
-      stream.write(buf);
+    if (--windowsize == 0) {
+      // send ack
+      var seqno = mpfmsg.SeqNo;
+      if (seqno) {
+        buf = mpf.createACKPacket(seqno);
+        console.log("sending ack packet => " + buf.toString('hex'));
+        stream.write(buf);
+        windowsize = 7;
+      }
     }
   });
 
