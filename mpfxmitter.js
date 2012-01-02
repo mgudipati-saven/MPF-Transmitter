@@ -100,10 +100,11 @@ eventEmitter.addListener("NewMPFPacket", function(buf) {
  *
  */
 function processAck(seqno) {
+  console.log("MPF Ack received for packet with seqno " + seqno);
+
   // cancel timeout
   clearTimeout(_timeoutId);
   
-  console.log("MPF Ack received for packet with seqno " + seqno);
   // adjust the outbox window
   console.log("window array = " + _windowArr);
   var inx = _windowArr.indexOf(seqno);
@@ -111,7 +112,7 @@ function processAck(seqno) {
   console.log("window array = " + _windowArr);
   
   // continue publishing
-  
+  sendPackets();
 }
 
 /*
@@ -138,9 +139,18 @@ function nextSeqNo() {
  * sends heartbeat packet to mpf server
  */
 function sendHeartbeat () {
-  buf = mpf.createType5Packet(nextSeqNo(), MPF_BANK_CODE);
-  console.log("sending heartbeat packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
-  mpfConnection.write(buf);
+  if (_windowArr.length < MPF_WINDOW_SIZE) {
+    var seqno = nextSeqNo();
+    buf = mpf.createType5Packet(seqno, MPF_BANK_CODE);
+    xmitmpf(seqno, buf);    
+    if (_windowArr.length == MPF_WINDOW_SIZE) {
+      // no more publishing possible, set timeout for an ack or nak
+      console.log("Setting timeout for ack/nak after window size reached 0");
+      _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
+    }
+  } else {
+    //TODO
+  }
 }
 
 var _outboxArr = new Array();
@@ -154,7 +164,6 @@ function sendPackets() {
   // check window size and inbox for messages
   while ( _windowArr.length < MPF_WINDOW_SIZE && _inboxArr.length != 0 ) {
     if ( sendPrices(_inboxArr.shift()) ) {
-      // adjust window size after a successful send
       if (_windowArr.length == MPF_WINDOW_SIZE) {
         // no more publishing possible, set timeout for an ack or nak
         console.log("Setting timeout for ack/nak after window size reached 0");
@@ -169,7 +178,21 @@ function sendPackets() {
  *
  */
 function processTimeout() {  
-  console.log("MPF Timeout"); 
+  console.log("MPF Timeout");
+  retransmit();
+}
+
+/*
+ *
+ */
+function retransmit () {
+  // send the packets again
+  _windowArr.forEach(function (seqno, pos) {
+    console.log("retransmitting type 2 packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
+    mpfConnection.write(_outboxArr[seqno]);
+  });
+
+  _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
 }
 
 /*
@@ -205,19 +228,24 @@ function sendPrices(jsonmsg) {
                                     arrlen,
                                     arr,
                                     0x30);
-        console.log("sending type 2 packet of size " + buf.length + " => <" + buf.toString('hex') + ">");
-        mpfConnection.write(buf);
-
-        // push it to outbox for restransmission if needed
-        _outboxArr[seqno] = jsonmsg;
-        
-        // adjust window size
-        _windowArr.push(seqno);
+        xmitmpf(seqno, buf);
+        return true;
       }
     } 
   }
   
   return false;
+}
+
+function xmitmpf(seqno, buf) {
+  console.log("sending mpf packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
+  mpfConnection.write(buf);
+
+  // push it to outbox for restransmission if needed
+  _outboxArr[seqno] = buf;
+  
+  // adjust window size
+  _windowArr.push(seqno);  
 }
 
 //
