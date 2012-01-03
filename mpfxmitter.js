@@ -124,7 +124,7 @@ function processAck(seqno) {
 /*
  *
  */
- var _nakCount = 0;
+var _nakCount = 0;
 function processNak(seqno) {
   console.log("MPF Nak received for packet with seqno " + seqno);
   
@@ -186,6 +186,10 @@ function prevSeqNo(seqno) {
  * sends heartbeat packet to mpf server
  */
 function sendHeartbeat () {
+  if (_reset) {
+    return;
+  }  
+  
   if (_windowArr.length < MPF_WINDOW_SIZE) {
     var seqno = nextSeqNo();
     buf = mpf.createType5Packet(seqno, MPF_BANK_CODE);

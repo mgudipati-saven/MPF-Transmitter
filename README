@@ -1,2 +1,33 @@
 [OpenIssues]
-=Reset packet is not acknowledged
+=When reset packet is not acknowledged.
+=Heartbeat when window size is zero.
+
+[TestCases]
+	[Ack]
+	=
+	
+	[Nak]
+	=When a Nak is received:
+	  , clear the 10 sec timeout
+	  , retransmit packets with seqno >= nak seqno
+	  , increment the nak count
+	  , if nak count is > 5, send reset seqno
+	  
+	[Heartbeat]
+	=Send heartbeat every 'HeartbeatInterval' secs
+	
+	[Type 2 Packet]
+	=
+	
+	[Reset]
+	=When a reset is sent:
+	  , stop further publishing
+	  , wait for ack for further publishing
+	  , seqno starts from 33
+	
+	[SeqNo]
+	=Starts from 33
+	=Wraps around after 127
+	
+	[Connection]
+	=
