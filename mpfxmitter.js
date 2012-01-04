@@ -14,12 +14,12 @@ var _logger = new (winston.Logger)({
   transports: [
     new (winston.transports.Console)({ 
       levels: winston.config.syslog.levels, 
-      level: 'debug', 
+      level: 'info', 
       timestamp: true
     }),
     new (winston.transports.File)({ 
       levels: winston.config.syslog.levels, 
-      level: 'info', 
+      level: 'debug', 
       timestamp: true, 
       json: false, 
       filename: './mpf.log' 
@@ -90,6 +90,16 @@ _logger.debug(JSON.stringify(_prop));
 // global array to collect price messages coming in
 var _inboxarr = new Array();
 
+// global array to save price messages for retransmission
+var _outboxarr = new Array();
+
+// global array to keep track of the send window size...contains seqnos
+var _sendwindow = new Array();
+
+// id for ack/nak timeouts
+var _timeoutid = null;
+
+
 //
 // event emitter
 //
@@ -97,17 +107,34 @@ var _eventemitter = new events.EventEmitter();
 
 // emit an event when a new packet arrives from ctf server
 _eventemitter.addListener("NewCTFMessage", function(buf) {
-  //_logger.debug("NewCTFMessage => " + buf.toString());
+  _logger.debug("NewCTFMessage = " + buf.toString());
 
   var ctfmsg = ctf.toJSONObject(buf.toString());
   
   if (ctfmsg['4']) {
     // quotes...collect them.
     _inboxarr.push(ctfmsg);
-    _logger.debug("num price messages = " + _inboxarr.length);
+    _logger.debug("inbox queue size = " + _inboxarr.length);
     
     // try to publish
     sendPackets();
+  }
+});
+
+// emit an event when a new packet arrives from mpf server
+_eventemitter.addListener("NewMPFPacket", function(buf) {
+  var mpfmsg = mpf.parse(buf);
+  _logger.debug("NewMPFPacket: " + JSON.stringify(mpfmsg));
+  
+	if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_ACK ) {
+	  // positive acknowledgement
+    processAck(mpfmsg.seqno);
+	} else if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_NAK ) {
+    // negative acknowledgement
+    processNak(mpfmsg.seqno);
+	}
+  else {
+    _logger.error("Error: MPF Packet type received: " + mpfmsg.packettype);
   }
 });
 
@@ -131,37 +158,22 @@ var _mpfsock = net.createConnection(_prop.mpf.port, _prop.mpf.host, function () 
 var laststate = mpf.MPF_FRAME_START,
     lastarr = new Array();
 _mpfsock.addListener("data", function (chunk) {
-  _logger.info("data is received from mpf server <= " + chunk.toString('hex'));
+  _logger.debug("data is received from mpf server <= " + chunk.toString('hex'));
   laststate = mpf.deserialize(chunk, laststate, lastarr, function (mpfarr) {
     _eventemitter.emit("NewMPFPacket", mpfarr);
   });
 });
 
 _mpfsock.addListener("end", function () {
-  _logger.info("mpf server disconnected...");
-});
-
-// emit an event when a new packet arrives from mpf server
-_eventemitter.addListener("NewMPFPacket", function(buf) {
-  var mpfmsg = mpf.parse(buf);
-  _logger.debug(mpfmsg);
-	if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_ACK ) {
-	  // positive acknowledgement
-    processAck(mpfmsg.seqno);
-	} else if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_NAK ) {
-    // negative acknowledgement
-    processNak(mpfmsg.seqno);
-	}
-  else {
-    _logger.error("Error: MPF Packet type received: " + mpfmsg.packettype);
-  }
+  _logger.error("mpf server disconnected...");
+  //TODO...attempt reconnection
 });
 
 /*
  *
  */
 function processAck(seqno) {
-  _logger.info("MPF Ack received for packet with seqno " + seqno);
+  _logger.debug("processAck: MPF Ack received for packet with seqno " + seqno);
 
   if (seqno == 32) {
     // reset acknowledged
@@ -171,10 +183,10 @@ function processAck(seqno) {
     clearTimeout(_timeoutid);
 
     // adjust the outbox window
-    _logger.debug("window array = " + _sendwindow);
+    _logger.debug("processAck: window array = " + _sendwindow);
     var inx = _sendwindow.indexOf(seqno);
     _sendwindow = _sendwindow.splice(++inx);
-    _logger.debug("window array = " + _sendwindow);
+    _logger.debug("processAck: window array = " + _sendwindow);
   }
   
   // continue publishing
@@ -186,7 +198,7 @@ function processAck(seqno) {
  */
 var _nakcnt = 0;
 function processNak(seqno) {
-  _logger.info("MPF Nak received for packet with seqno " + seqno);
+  _logger.debug("processNak: MPF Nak received for packet with seqno " + seqno);
   
   // clear timeout
   clearTimeout(_timeoutid);
@@ -198,10 +210,10 @@ function processNak(seqno) {
     _nakcnt = 0;
   } else {
     // adjust the outbox window
-    _logger.debug("window array = " + _sendwindow);
+    _logger.debug("processNak: window array = " + _sendwindow);
     var inx = _sendwindow.indexOf(prevSeqNo(seqno));
     _sendwindow = _sendwindow.splice(++inx);
-    _logger.debug("window array = " + _sendwindow);
+    _logger.debug("processNak: window array = " + _sendwindow);
 
     // retransmit
     retransmit();
@@ -211,7 +223,7 @@ function processNak(seqno) {
 var _reset = false;
 function sendReset() {
   // send a reset packet with seqno 32
-  _logger.info("Sending reset packet");
+  _logger.info("sendReset: sending reset packet");
   var buf = mpf.createResetPacket();
   _mpfsock.write(buf);
   _reset = true;
@@ -246,7 +258,9 @@ function prevSeqNo(seqno) {
  * sends heartbeat packet to mpf server
  */
 function sendHeartbeat () {
+  _logger.debug("sendHeartbeat: entered");
   if (_reset) {
+    _logger.debug("sendHeartbeat: in reset, can't send heartbeat");
     return;
   }  
   
@@ -256,7 +270,7 @@ function sendHeartbeat () {
     xmitmpf(seqno, buf);    
     if (_sendwindow.length == _prop.mpf.windowsize) {
       // no more publishing possible, set timeout for an ack or nak
-      _logger.debug("Setting timeout for ack/nak after window size reached 0");
+      _logger.debug("sendHeartbeat: setting timeout for ack/nak after window size reached 0");
       _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
     }
   } else {
@@ -264,15 +278,13 @@ function sendHeartbeat () {
   }
 }
 
-var _outboxarr = new Array();
-var _sendwindow = new Array();
-var _timeoutid = null;
-
 /*
  *
  */
 function sendPackets() {
+  _logger.debug("sendPackets: entered");
   if (_reset) {
+    _logger.debug("sendPackets: in reset");
     return;
   }
   
@@ -281,7 +293,7 @@ function sendPackets() {
     if ( sendPrices(_inboxarr.shift()) ) {
       if (_sendwindow.length == _prop.mpf.windowsize) {
         // no more publishing possible, set timeout for an ack or nak
-        _logger.debug("Setting timeout for ack/nak after window size reached 0");
+        _logger.debug("sendPackets: setting timeout for ack/nak after window size reached 0");
         _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
         break;
       }
@@ -293,7 +305,7 @@ function sendPackets() {
  *
  */
 function processTimeout() {  
-  _logger.debug("MPF Timeout");
+  _logger.debug("processTimeout: entered");
   retransmit();
 }
 
@@ -301,9 +313,10 @@ function processTimeout() {
  *
  */
 function retransmit () {
+  _logger.debug("retransmit: entered");
   // send the packets from outbox again
   _sendwindow.forEach(function (seqno, pos) {
-    _logger.debug("retransmitting packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
+    _logger.debug("retransmit: packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
     _mpfsock.write(_outboxarr[seqno]);
   });
 
@@ -327,7 +340,8 @@ function findSecurity (sym) {
  * sends type 2 packet to mpf server
  */
 function sendPrices(jsonmsg) {
-  _logger.debug("Send Prices: " + JSON.stringify(jsonmsg));
+  _logger.debug("sendPrices: entered");
+  _logger.info("sendPrices: " + JSON.stringify(jsonmsg));
 
   var srcid = jsonmsg['4'],
       sym = jsonmsg['5'],
@@ -336,7 +350,6 @@ function sendPrices(jsonmsg) {
   if ( srcid && sym && time ) {
     // trade or quote message,  check if on our watchlist
     var sec = findSecurity(sym);
-    _logger.debug("Found Security: " + JSON.stringify(sec));
     if (sec) {
       // create a data array for the required transaction types
       var arr = new Array(),
@@ -389,20 +402,17 @@ var _ctfsock = net.createConnection(_prop.ctf.port, _prop.ctf.host);
 */
 
 // List of CTF commands
-var _ctfCommandList = [ 
+var ctfcmds = [ 
 	"5022=LoginUser|5028="+_prop.ctf.userid+"|5029="+_prop.ctf.password+"|5026=1",
 	"5022=SelectAvailableTokens|5026=5",
 	//"5022=SelectUserTokens|5035=5|5035=308|5035=378|5026=9",
-	//"5022=QuerySnap|4=941|5=E:TCS.EQ|5026=11",
-	//"5022=Subscribe|4=741|5026=12",
-	//"5022=Subscribe|4=741|5026=12",
 ];
 
 _ctfsock.addListener("connect", function () {
   _logger.debug("connection is established with ctf server...");
   //client.setEncoding('ascii');
   
-	_ctfCommandList.forEach(function(cmd, pos) {
+	ctfcmds.forEach(function(cmd, pos) {
 		_ctfsock.write(ctf.serialize(cmd));
 	});
 	
@@ -411,7 +421,6 @@ _ctfsock.addListener("connect", function () {
 	  var cmd = "5022=QuerySnapAndSubscribe|4=741|5="+sec.IDCTicker+"|5026="+10+pos;
 		_ctfsock.write(ctf.serialize(cmd));
 	});
-	
 });
 
 // ctf message parser states...
@@ -429,14 +438,14 @@ var ctfState = EXPECTING_CTF_FRAME_START, // current ctf state
   payloadSizeBytesLeft = 0; // ctf payload size bytes left to be processed
 
 _ctfsock.addListener("data", function (chunk) {
-  //_logger.debug("data is received from ctf server..." + chunk.toString());
+  _logger.debug("data is received from ctf server..." + chunk.toString());
   for (var i = 0; i < chunk.length; i++) {
     switch (ctfState) {
       case EXPECTING_CTF_FRAME_START:
         if (chunk[i] == ctf.FRAME_START) {
           ctfState = EXPECTING_CTF_PROTOCOL_SIGNATURE;
         } else {
-          _logger.debug("Error: expecting ctf start byte, received " + chunk[i]);
+          _logger.error("Error: expecting ctf start byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -447,7 +456,7 @@ _ctfsock.addListener("data", function (chunk) {
           payloadSizeBuffer = new Buffer(4);
           payloadSizeBytesLeft = 4;
         } else {
-          _logger.debug("Error: expecting ctf protocol signature byte, received " + chunk[i]);
+          _logger.error("Error: expecting ctf protocol signature byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -458,9 +467,9 @@ _ctfsock.addListener("data", function (chunk) {
 
         if (payloadSizeBytesLeft == 0) {
           // done collecting payload size bytes
-          //_logger.debug(payloadSizeBuffer);
+          _logger.debug("ctf payload size buffer = " + payloadSizeBuffer);
           var payloadSize = myutil.toNum(payloadSizeBuffer);
-          //_logger.debug("payload size = ", payloadSize);
+          _logger.debug("ctf payload size = ", payloadSize);
           payloadBuffer = new Buffer(payloadSize);
           payloadBytesLeft = payloadSize;
           ctfState = EXPECTING_CTF_PAYLOAD;
@@ -470,19 +479,18 @@ _ctfsock.addListener("data", function (chunk) {
       case EXPECTING_CTF_PAYLOAD:
         payloadBuffer[payloadBuffer.length - payloadBytesLeft--] = chunk[i];
         if (payloadBytesLeft == 0) {
-          //_logger.debug("New CTF Message: " + payloadBuffer);
+          _logger.debug("New CTF Message: " + payloadBuffer);
           ctfState = EXPECTING_CTF_FRAME_END;
         }
       break;
 
       case EXPECTING_CTF_FRAME_END:
         if (chunk[i] == ctf.FRAME_END) {
-          //lastCTFMessage = payloadBuffer.toString();
-          //_logger.debug("=>" + payloadBuffer.toString());
+          _logger.debug("ctf payload =" + payloadBuffer.toString());
           _eventemitter.emit("NewCTFMessage", payloadBuffer);
           ctfState = EXPECTING_CTF_FRAME_START;
         } else {
-          _logger.debug("Error: expecting ctf frame end byte, received " + chunk[i]);
+          _logger.error("Error: expecting ctf frame end byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -492,4 +500,5 @@ _ctfsock.addListener("data", function (chunk) {
 
 _ctfsock.addListener("end", function () {
   _logger.debug("ctf server disconnected...");
+  //TODO attempt reconnection
 });
