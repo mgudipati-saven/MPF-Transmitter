@@ -34,28 +34,28 @@ _logger.debug(JSON.stringify(_ini));
 //
 // global settings
 //
-var _config = {};
+var _prop = {};
 
 // ctf configuration
-_config.ctf = {};
-_config.ctf.host = _ini.CTF.Host;
-_config.ctf.port = _ini.CTF.Port;
-_config.ctf.userid = _ini.CTF.UserID;
-_config.ctf.password = _ini.CTF.Password;
+_prop.ctf = {};
+_prop.ctf.host = _ini.CTF.Host;
+_prop.ctf.port = _ini.CTF.Port;
+_prop.ctf.userid = _ini.CTF.UserID;
+_prop.ctf.password = _ini.CTF.Password;
 
 // mpf configuration
-_config.mpf = {};
-_config.mpf.host = _ini.MPF.Host;
-_config.mpf.port = _ini.MPF.Port;
-_config.mpf.heartbeatinterval = ( typeof _ini.MPF.HeartbeatInterval == 'undefined' ? 60 : _ini.MPF.HeartbeatInterval );
-_config.mpf.publishinterval = ( typeof _ini.MPF.PublishInterval == 'undefined' ? 10 : _ini.MPF.PublishInterval );
-_config.mpf.windowsize = ( typeof _ini.MPF.WindowSize == 'undefined' ? 7 : _ini.MPF.WindowSize );
-_config.mpf.timeout = ( typeof _ini.MPF.Timeout == 'undefined' ? 10 : _ini.MPF.Timeout );
-_config.mpf.naklimit = ( typeof _ini.MPF.NakLimit == 'undefined' ? 5 : _ini.MPF.NakLimit );
-_config.mpf.bankcode = ( typeof _ini.MPF.BankCode == 'undefined' ? 'IDCO' : _ini.MPF.BankCode );
-_config.mpf.citycode = ( typeof _ini.MPF.CityCode == 'undefined' ? 'NYS' : _ini.MPF.CityCode );
-_config.mpf.exch = _ini.MPF.Exchanges.split(",");
-_config.fieldmap = _ini.FieldMap;
+_prop.mpf = {};
+_prop.mpf.host = _ini.MPF.Host;
+_prop.mpf.port = _ini.MPF.Port;
+_prop.mpf.heartbeatinterval = ( typeof _ini.MPF.HeartbeatInterval == 'undefined' ? 60 : _ini.MPF.HeartbeatInterval );
+_prop.mpf.publishinterval = ( typeof _ini.MPF.PublishInterval == 'undefined' ? 10 : _ini.MPF.PublishInterval );
+_prop.mpf.windowsize = ( typeof _ini.MPF.WindowSize == 'undefined' ? 7 : _ini.MPF.WindowSize );
+_prop.mpf.timeout = ( typeof _ini.MPF.Timeout == 'undefined' ? 10 : _ini.MPF.Timeout );
+_prop.mpf.naklimit = ( typeof _ini.MPF.NakLimit == 'undefined' ? 5 : _ini.MPF.NakLimit );
+_prop.mpf.bankcode = ( typeof _ini.MPF.BankCode == 'undefined' ? 'IDCO' : _ini.MPF.BankCode );
+_prop.mpf.citycode = ( typeof _ini.MPF.CityCode == 'undefined' ? 'NYS' : _ini.MPF.CityCode );
+_prop.mpf.exch = _ini.MPF.Exchanges.split(",");
+_prop.fieldmap = _ini.FieldMap;
 
 //    
 // master securities = { 
@@ -66,7 +66,7 @@ _config.fieldmap = _ini.FieldMap;
 // };
 
 var arr = new Array();
-_config.mpf.exch.forEach(function(exch, pos) {
+_prop.mpf.exch.forEach(function(exch, pos) {
   var section = _ini[exch]; // [ASX]
   if (section) {
     if (section.Securities) { // Securities=IHDIV,ILCIV,IOZIV,ISOIV
@@ -84,8 +84,8 @@ _config.mpf.exch.forEach(function(exch, pos) {
     }
   }
 });
-_config.securities = arr;
-_logger.debug(JSON.stringify(_config));
+_prop.securities = arr;
+_logger.debug(JSON.stringify(_prop));
 
 // global array to collect price messages coming in
 var _inboxarr = new Array();
@@ -114,11 +114,11 @@ _eventemitter.addListener("NewCTFMessage", function(buf) {
 //
 // mpf socket
 //
-var _mpfsock = net.createConnection(_config.mpf.port, _config.mpf.host, function () {
+var _mpfsock = net.createConnection(_prop.mpf.port, _prop.mpf.host, function () {
   _logger.info("connection is established with mpf server...");
   
   // start the heartbeat timer
-  setInterval(sendHeartbeat, 1000 * _config.mpf.heartbeatinterval);
+  setInterval(sendHeartbeat, 1000 * _prop.mpf.heartbeatinterval);
 
   // start the publish timer
   //setInterval(sendPackets, 1000 * _mpfPublishInterval);
@@ -250,14 +250,14 @@ function sendHeartbeat () {
     return;
   }  
   
-  if (_sendwindow.length < _config.mpf.windowsize) {
+  if (_sendwindow.length < _prop.mpf.windowsize) {
     var seqno = nextSeqNo();
-    buf = mpf.createType5Packet(seqno, _config.mpf.bankcode);
+    buf = mpf.createType5Packet(seqno, _prop.mpf.bankcode);
     xmitmpf(seqno, buf);    
-    if (_sendwindow.length == _config.mpf.windowsize) {
+    if (_sendwindow.length == _prop.mpf.windowsize) {
       // no more publishing possible, set timeout for an ack or nak
       _logger.debug("Setting timeout for ack/nak after window size reached 0");
-      _timeoutid = setTimeout(processTimeout, 1000 * _config.mpf.timeout);
+      _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
     }
   } else {
     //TODO
@@ -277,12 +277,12 @@ function sendPackets() {
   }
   
   // check window size and inbox for messages
-  while ( _sendwindow.length < _config.mpf.windowsize && _inboxarr.length != 0 ) {
+  while ( _sendwindow.length < _prop.mpf.windowsize && _inboxarr.length != 0 ) {
     if ( sendPrices(_inboxarr.shift()) ) {
-      if (_sendwindow.length == _config.mpf.windowsize) {
+      if (_sendwindow.length == _prop.mpf.windowsize) {
         // no more publishing possible, set timeout for an ack or nak
         _logger.debug("Setting timeout for ack/nak after window size reached 0");
-        _timeoutid = setTimeout(processTimeout, 1000 * _config.mpf.timeout);
+        _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
         break;
       }
     }
@@ -313,7 +313,7 @@ function retransmit () {
 
 // finds a security record in the config securities array
 function findSecurity (sym) {
-  var arr = _config.securities;
+  var arr = _prop.securities;
   for (var i = 0; i < arr.length; i++) {
     if (arr[i].IDCTicker == sym) {
       return arr[i];
@@ -336,13 +336,13 @@ function sendPrices(jsonmsg) {
   if ( srcid && sym && time ) {
     // trade or quote message,  check if on our watchlist
     var sec = findSecurity(sym);
-    _logger.debug("Found Security: " + sec);
+    _logger.debug("Found Security: " + JSON.stringify(sec));
     if (sec) {
       // create a data array for the required transaction types
       var arr = new Array(),
           arrlen = 0;
       sec.TransactionTypes.forEach(function(type, pos) {
-        var field = _config.fieldmap[type];
+        var field = _prop.fieldmap[type];
         if (field && jsonmsg[field]) {
           arr[type] = jsonmsg[field];
           arrlen++;
@@ -352,7 +352,7 @@ function sendPrices(jsonmsg) {
         var seqno = nextSeqNo();
         buf = mpf.createType2Packet(seqno, 
                                     sec.RecordType,
-                                    _config.mpf.citycode+_config.mpf.bankcode,
+                                    _prop.mpf.citycode+_prop.mpf.bankcode,
                                     new Date(parseInt(time)).format("HH:MM:ss"),
                                     sec.IDType,
                                     sym,
@@ -382,7 +382,7 @@ function xmitmpf(seqno, buf) {
 //
 // ctf socket
 //
-var _ctfsock = net.createConnection(_config.ctf.port, _config.ctf.host);
+var _ctfsock = net.createConnection(_prop.ctf.port, _prop.ctf.host);
 
 /* 
 * ctf connection handlers
@@ -390,7 +390,7 @@ var _ctfsock = net.createConnection(_config.ctf.port, _config.ctf.host);
 
 // List of CTF commands
 var _ctfCommandList = [ 
-	"5022=LoginUser|5028="+_config.ctf.userid+"|5029="+_config.ctf.password+"|5026=1",
+	"5022=LoginUser|5028="+_prop.ctf.userid+"|5029="+_prop.ctf.password+"|5026=1",
 	"5022=SelectAvailableTokens|5026=5",
 	//"5022=SelectUserTokens|5035=5|5035=308|5035=378|5026=9",
 	//"5022=QuerySnap|4=941|5=E:TCS.EQ|5026=11",
@@ -407,7 +407,7 @@ _ctfsock.addListener("connect", function () {
 	});
 	
 	// subscribe to the watchlist
-	_config.securities.forEach(function(sec, pos) {
+	_prop.securities.forEach(function(sec, pos) {
 	  var cmd = "5022=QuerySnapAndSubscribe|4=741|5="+sec.IDCTicker+"|5026="+10+pos;
 		_ctfsock.write(ctf.serialize(cmd));
 	});
