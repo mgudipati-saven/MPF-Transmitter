@@ -3,31 +3,40 @@
 =Heartbeat when window size is zero.
 
 [TestCases]
-	[Ack]
-	=
+	[1.Ack]
+	1.1=Start a 10 sec timeout after sending 7 packets including type 2 and heartbeat
+	1.2=When an Ack is received:
+	  1.2, clear the 10 sec timeout
+	  1.3, transmit new packets, if any
 	
-	[Nak]
-	=When a Nak is received:
-	  , clear the 10 sec timeout
-	  , retransmit packets with seqno >= nak seqno
-	  , increment the nak count
-	  , if nak count is > 5, send reset seqno
+	[2.Nak]
+	2.1=When a Nak is received:
+	  2.1, clear the 10 sec timeout
+	  2.2, retransmit packets with seqno >= nak seqno
+	  2.3, transmit new packets, if any
+	  2.4, increment the nak count
+	  2.5, if nak count is > 5, send reset seqno
 	  
-	[Heartbeat]
-	=Send heartbeat every 'HeartbeatInterval' secs
+	[3.Heartbeat]
+	3.1=Send heartbeat every 60 secs
+	3.2=When in reset:
+	  3.2, skip heartbeat
 	
-	[Type 2 Packet]
-	=
+	[4.Type 2 Packet]
+	4.1=Send type 2 packet
 	
-	[Reset]
-	=When a reset is sent:
-	  , stop further publishing
-	  , wait for ack for further publishing
-	  , seqno starts from 33
+	[5.Reset]
+	5.1=When a reset is sent:
+	  5.1, stop further publishing
+	  5.2, wait for ack for further publishing
+	  5.3, new transmissions sent with seqno starting from 33
 	
-	[SeqNo]
-	=Starts from 33
-	=Wraps around after 127
+	[6.SeqNo]
+	6.1=Starts from 33
+	6.2=Wraps around after 127
 	
-	[Connection]
-	=
+	[7.MPF Connection]
+	7.1=Connect to mpf feed on the given host:port
+	7.2=Reconnect:
+	  7.2, when disconnected, attempt to reconnect
+	  7.3, reset seqno

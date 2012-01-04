@@ -320,7 +320,7 @@ function retransmit () {
     _mpfsock.write(_outboxarr[seqno]);
   });
 
-  // send more packets, if any
+  // send more packets if inbox has any and window is empty
   sendPackets();
 }
 
