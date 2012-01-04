@@ -170,10 +170,10 @@ exports.parse = function parse (buf) {
   
   // header
   if (buf[1]) {
-    mpfmsg['PacketType'] = buf[1];    
+    mpfmsg.packettype = buf[1];    
   }
   if (buf[2]) {
-    mpfmsg['SeqNo'] = buf[2];    
+    mpfmsg.seqno = buf[2];    
   }
 
   return mpfmsg;

@@ -20,7 +20,7 @@ var server = net.createServer(function (stream) {
       var seqno = mpfmsg.SeqNo;
       if (seqno) {
         buf = mpf.createACKPacket(seqno);
-        console.log("sending ack packet => " + buf.toString('hex'));
+        console.log("sending nak packet for seqno " + seqno + " => " + buf.toString('hex'));
         stream.write(buf);
         windowsize = 7;
       }

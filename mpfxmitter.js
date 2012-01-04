@@ -1,67 +1,127 @@
 var net = require('net'),
     events = require('events'),
-    iniparser = require('../src/node_modules/iniparser/lib/node-iniparser'),
+    util = require('util'),
+    iniparser = require('iniparser'),
+    winston = require('winston'),
     mpf = require('./mpf'),
-    util = require('./util'),
+    myutil = require('./util'),
     ctf = require('./ctf');
 
+//
+// Create a new winston logger instance with two tranports: Console, and File
+//
+var _logger = new (winston.Logger)({
+  transports: [
+    new (winston.transports.Console)({ 
+      levels: winston.config.syslog.levels, 
+      level: 'debug', 
+      timestamp: true
+    }),
+    new (winston.transports.File)({ 
+      levels: winston.config.syslog.levels, 
+      level: 'info', 
+      timestamp: true, 
+      json: false, 
+      filename: './mpf.log' 
+    })
+  ]
+});
+
 // parse ini configuration file
-var config = iniparser.parseSync('./config.ini');
-console.log(config);
+var _ini = iniparser.parseSync('./config.ini');
+_logger.debug(JSON.stringify(_ini));
+
+//
+// global settings
+//
+var _config = {};
 
 // ctf configuration
-var CTF_HOST = config.CTF.Host,
-    CTF_PORT = config.CTF.Port,
-    CTF_USERID = config.CTF.UserID,
-    CTF_PASSWORD = config.CTF.Password;
+_config.ctf = {};
+_config.ctf.host = _ini.CTF.Host;
+_config.ctf.port = _ini.CTF.Port;
+_config.ctf.userid = _ini.CTF.UserID;
+_config.ctf.password = _ini.CTF.Password;
 
 // mpf configuration
-var MPF_HOST = config.MPF.Host,
-    MPF_PORT = config.MPF.Port,
-    MPF_HEARTBEAT_INTERVAL = config.MPF.HeartbeatInterval,
-    MPF_PUBLISH_INTERVAL = config.MPF.PublishInterval,
-    MPF_WINDOW_SIZE = config.MPF.WindowSize,
-    MPF_TIMEOUT = config.MPF.Timeout,
-    MPF_NAK_LIMIT = config.MPF.NakLimit,
-    MPF_BANK_CODE = config.MPF.BankCode,
-    MPF_CITY_CODE = config.MPF.CityCode,
-    exchanges = config.MPF.Exchanges.split(","),
-    jsonFieldMap = config.FieldMap;
-    
-// master securities watchlist
-var securitiesWatchList = new Array();
-var jsonSecurities = {};
-exchanges.forEach(function(exch, pos) {
-  var section = config[exch];
+_config.mpf = {};
+_config.mpf.host = _ini.MPF.Host;
+_config.mpf.port = _ini.MPF.Port;
+_config.mpf.heartbeatinterval = ( typeof _ini.MPF.HeartbeatInterval == 'undefined' ? 60 : _ini.MPF.HeartbeatInterval );
+_config.mpf.publishinterval = ( typeof _ini.MPF.PublishInterval == 'undefined' ? 10 : _ini.MPF.PublishInterval );
+_config.mpf.windowsize = ( typeof _ini.MPF.WindowSize == 'undefined' ? 7 : _ini.MPF.WindowSize );
+_config.mpf.timeout = ( typeof _ini.MPF.Timeout == 'undefined' ? 10 : _ini.MPF.Timeout );
+_config.mpf.naklimit = ( typeof _ini.MPF.NakLimit == 'undefined' ? 5 : _ini.MPF.NakLimit );
+_config.mpf.bankcode = ( typeof _ini.MPF.BankCode == 'undefined' ? 'IDCO' : _ini.MPF.BankCode );
+_config.mpf.citycode = ( typeof _ini.MPF.CityCode == 'undefined' ? 'NYS' : _ini.MPF.CityCode );
+_config.mpf.exch = _ini.MPF.Exchanges.split(",");
+_config.fieldmap = _ini.FieldMap;
+
+//    
+// master securities = { 
+//  securities: [
+//    {BBTicker: 'IHDIV', IDCTicker: 'I:IHD.IV', IDType: 4, RecordType: 70, TransactionTypes: [T,A]},
+//    {BBTicker: 'ILCIV', IDCTicker: 'I:ILC.IV', IDType: 4, RecordType: 70, TransactionTypes: [T,A]}
+//  ]
+// };
+
+var arr = new Array();
+_config.mpf.exch.forEach(function(exch, pos) {
+  var section = _ini[exch]; // [ASX]
   if (section) {
-    if (section.Securities) {
+    if (section.Securities) { // Securities=IHDIV,ILCIV,IOZIV,ISOIV
       section.Securities.split(",").forEach(function(security, pos) {
-        var sym = config[security].IDCTicker;
+        var sym = _ini[security].IDCTicker;
         if (sym) {
-          securitiesWatchList.push(sym);
-          jsonSecurities[sym] = { "BBTicker": security, 
-                                  "IDType": config[security].IDType,
-                                  "RecordType": config[security].RecordType,
-                                  "TransactionTypes": config[security].TransactionTypes.split(",")
-                                };
+          arr.push({IDCTicker: sym,
+                    BBTicker: security, 
+                    IDType: _ini[security].IDType,
+                    RecordType: _ini[security].RecordType,
+                    TransactionTypes: _ini[security].TransactionTypes.split(",")
+                  });
         }
       });
     }
   }
 });
+_config.securities = arr;
+_logger.debug(JSON.stringify(_config));
 
+// global array to collect price messages coming in
+var _inboxarr = new Array();
+
+//
 // event emitter
-var eventEmitter = new events.EventEmitter();
+//
+var _eventemitter = new events.EventEmitter();
+
+// emit an event when a new packet arrives from ctf server
+_eventemitter.addListener("NewCTFMessage", function(buf) {
+  //_logger.debug("NewCTFMessage => " + buf.toString());
+
+  var ctfmsg = ctf.toJSONObject(buf.toString());
   
-// mpf connection
-var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
-  console.log("connection is established with mpf server...");
+  if (ctfmsg['4']) {
+    // quotes...collect them.
+    _inboxarr.push(ctfmsg);
+    _logger.debug("num price messages = " + _inboxarr.length);
+    
+    // try to publish
+    sendPackets();
+  }
+});
+
+//
+// mpf socket
+//
+var _mpfsock = net.createConnection(_config.mpf.port, _config.mpf.host, function () {
+  _logger.info("connection is established with mpf server...");
   
   // start the heartbeat timer
-  setInterval(sendHeartbeat, 1000 * MPF_HEARTBEAT_INTERVAL);
+  setInterval(sendHeartbeat, 1000 * _config.mpf.heartbeatinterval);
 
   // start the publish timer
-  //setInterval(sendPackets, 1000 * MPF_PUBLISH_INTERVAL);
+  //setInterval(sendPackets, 1000 * _mpfPublishInterval);
 });
 
 /* 
@@ -70,30 +130,30 @@ var mpfConnection = net.createConnection(MPF_PORT, MPF_HOST, function () {
 
 var laststate = mpf.MPF_FRAME_START,
     lastarr = new Array();
-mpfConnection.addListener("data", function (chunk) {
-  console.log("data is received from mpf server <= " + chunk.toString('hex'));
+_mpfsock.addListener("data", function (chunk) {
+  _logger.info("data is received from mpf server <= " + chunk.toString('hex'));
   laststate = mpf.deserialize(chunk, laststate, lastarr, function (mpfarr) {
-    eventEmitter.emit("NewMPFPacket", mpfarr);
+    _eventemitter.emit("NewMPFPacket", mpfarr);
   });
 });
 
-mpfConnection.addListener("end", function () {
-  console.log("mpf server disconnected...");
+_mpfsock.addListener("end", function () {
+  _logger.info("mpf server disconnected...");
 });
 
 // emit an event when a new packet arrives from mpf server
-eventEmitter.addListener("NewMPFPacket", function(buf) {
+_eventemitter.addListener("NewMPFPacket", function(buf) {
   var mpfmsg = mpf.parse(buf);
-  console.log(mpfmsg);
-	if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_ACK ) {
+  _logger.debug(mpfmsg);
+	if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_ACK ) {
 	  // positive acknowledgement
-    processAck(mpfmsg.SeqNo);
-	} else if ( mpfmsg.PacketType == mpf.MPF_PACKET_TYPE_NAK ) {
+    processAck(mpfmsg.seqno);
+	} else if ( mpfmsg.packettype == mpf.MPF_PACKET_TYPE_NAK ) {
     // negative acknowledgement
-    processNak(mpfmsg.SeqNo);
+    processNak(mpfmsg.seqno);
 	}
   else {
-    console.log("Error: MPF Packet type received: " + mpfmsg.PacketType);
+    _logger.error("Error: MPF Packet type received: " + mpfmsg.packettype);
   }
 });
 
@@ -101,20 +161,20 @@ eventEmitter.addListener("NewMPFPacket", function(buf) {
  *
  */
 function processAck(seqno) {
-  console.log("MPF Ack received for packet with seqno " + seqno);
+  _logger.info("MPF Ack received for packet with seqno " + seqno);
 
   if (seqno == 32) {
     // reset acknowledged
     _reset = false;
   } else {
     // clear timeout
-    clearTimeout(_timeoutId);
+    clearTimeout(_timeoutid);
 
     // adjust the outbox window
-    console.log("window array = " + _windowArr);
-    var inx = _windowArr.indexOf(seqno);
-    _windowArr = _windowArr.splice(++inx);
-    console.log("window array = " + _windowArr);
+    _logger.debug("window array = " + _sendwindow);
+    var inx = _sendwindow.indexOf(seqno);
+    _sendwindow = _sendwindow.splice(++inx);
+    _logger.debug("window array = " + _sendwindow);
   }
   
   // continue publishing
@@ -124,24 +184,24 @@ function processAck(seqno) {
 /*
  *
  */
-var _nakCount = 0;
+var _nakcnt = 0;
 function processNak(seqno) {
-  console.log("MPF Nak received for packet with seqno " + seqno);
+  _logger.info("MPF Nak received for packet with seqno " + seqno);
   
   // clear timeout
-  clearTimeout(_timeoutId);
+  clearTimeout(_timeoutid);
   
-  if (++_nakCount == MPF_NAK_LIMIT) {
+  if (++_nakcnt == _mpfNakLimit) {
     // nak count exceeded max allowed limit
     resetSeqNo();
     sendReset();
-    _nakCount = 0;
+    _nakcnt = 0;
   } else {
     // adjust the outbox window
-    console.log("window array = " + _windowArr);
-    var inx = _windowArr.indexOf(prevSeqNo(seqno));
-    _windowArr = _windowArr.splice(++inx);
-    console.log("window array = " + _windowArr);
+    _logger.debug("window array = " + _sendwindow);
+    var inx = _sendwindow.indexOf(prevSeqNo(seqno));
+    _sendwindow = _sendwindow.splice(++inx);
+    _logger.debug("window array = " + _sendwindow);
 
     // retransmit
     retransmit();
@@ -151,9 +211,9 @@ function processNak(seqno) {
 var _reset = false;
 function sendReset() {
   // send a reset packet with seqno 32
-  console.log("Sending reset packet");
+  _logger.info("Sending reset packet");
   var buf = mpf.createResetPacket();
-  mpfConnection.write(buf);
+  _mpfsock.write(buf);
   _reset = true;
 }
 
@@ -190,23 +250,23 @@ function sendHeartbeat () {
     return;
   }  
   
-  if (_windowArr.length < MPF_WINDOW_SIZE) {
+  if (_sendwindow.length < _config.mpf.windowsize) {
     var seqno = nextSeqNo();
-    buf = mpf.createType5Packet(seqno, MPF_BANK_CODE);
+    buf = mpf.createType5Packet(seqno, _config.mpf.bankcode);
     xmitmpf(seqno, buf);    
-    if (_windowArr.length == MPF_WINDOW_SIZE) {
+    if (_sendwindow.length == _config.mpf.windowsize) {
       // no more publishing possible, set timeout for an ack or nak
-      console.log("Setting timeout for ack/nak after window size reached 0");
-      _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
+      _logger.debug("Setting timeout for ack/nak after window size reached 0");
+      _timeoutid = setTimeout(processTimeout, 1000 * _config.mpf.timeout);
     }
   } else {
     //TODO
   }
 }
 
-var _outboxArr = new Array();
-var _windowArr = new Array();
-var _timeoutId = null;
+var _outboxarr = new Array();
+var _sendwindow = new Array();
+var _timeoutid = null;
 
 /*
  *
@@ -217,12 +277,12 @@ function sendPackets() {
   }
   
   // check window size and inbox for messages
-  while ( _windowArr.length < MPF_WINDOW_SIZE && _inboxArr.length != 0 ) {
-    if ( sendPrices(_inboxArr.shift()) ) {
-      if (_windowArr.length == MPF_WINDOW_SIZE) {
+  while ( _sendwindow.length < _config.mpf.windowsize && _inboxarr.length != 0 ) {
+    if ( sendPrices(_inboxarr.shift()) ) {
+      if (_sendwindow.length == _config.mpf.windowsize) {
         // no more publishing possible, set timeout for an ack or nak
-        console.log("Setting timeout for ack/nak after window size reached 0");
-        _timeoutId = setTimeout(processTimeout, 1000 * MPF_TIMEOUT);
+        _logger.debug("Setting timeout for ack/nak after window size reached 0");
+        _timeoutid = setTimeout(processTimeout, 1000 * _config.mpf.timeout);
         break;
       }
     }
@@ -233,7 +293,7 @@ function sendPackets() {
  *
  */
 function processTimeout() {  
-  console.log("MPF Timeout");
+  _logger.debug("MPF Timeout");
   retransmit();
 }
 
@@ -242,32 +302,47 @@ function processTimeout() {
  */
 function retransmit () {
   // send the packets from outbox again
-  _windowArr.forEach(function (seqno, pos) {
-    console.log("retransmitting packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
-    mpfConnection.write(_outboxArr[seqno]);
+  _sendwindow.forEach(function (seqno, pos) {
+    _logger.debug("retransmitting packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
+    _mpfsock.write(_outboxarr[seqno]);
   });
 
   // send more packets, if any
   sendPackets();
 }
 
+// finds a security record in the config securities array
+function findSecurity (sym) {
+  var arr = _config.securities;
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i].IDCTicker == sym) {
+      return arr[i];
+    }
+  }
+  
+  return null;  
+}
+
 /*
  * sends type 2 packet to mpf server
  */
 function sendPrices(jsonmsg) {
+  _logger.debug("Send Prices: " + JSON.stringify(jsonmsg));
+
   var srcid = jsonmsg['4'],
       sym = jsonmsg['5'],
       time = jsonmsg['16'];
 
   if ( srcid && sym && time ) {
-    console.log(jsonmsg);
     // trade or quote message,  check if on our watchlist
-    if (jsonSecurities[sym]) {
+    var sec = findSecurity(sym);
+    _logger.debug("Found Security: " + sec);
+    if (sec) {
       // create a data array for the required transaction types
       var arr = new Array(),
           arrlen = 0;
-      jsonSecurities[sym].TransactionTypes.forEach(function(type, pos) {
-        var field = jsonFieldMap[type];
+      sec.TransactionTypes.forEach(function(type, pos) {
+        var field = _config.fieldmap[type];
         if (field && jsonmsg[field]) {
           arr[type] = jsonmsg[field];
           arrlen++;
@@ -276,10 +351,10 @@ function sendPrices(jsonmsg) {
       if (arrlen != 0) {
         var seqno = nextSeqNo();
         buf = mpf.createType2Packet(seqno, 
-                                    jsonSecurities[sym].RecordType,
-                                    MPF_CITY_CODE+MPF_BANK_CODE,
+                                    sec.RecordType,
+                                    _config.mpf.citycode+_config.mpf.bankcode,
                                     new Date(parseInt(time)).format("HH:MM:ss"),
-                                    jsonSecurities[sym].IDType,
+                                    sec.IDType,
                                     sym,
                                     arrlen,
                                     arr,
@@ -294,28 +369,28 @@ function sendPrices(jsonmsg) {
 }
 
 function xmitmpf(seqno, buf) {
-  console.log("sending mpf packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
-  mpfConnection.write(buf);
+  _logger.info("sending mpf packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
+  _mpfsock.write(buf);
 
   // push it to outbox for restransmission if needed
-  _outboxArr[seqno] = buf;
+  _outboxarr[seqno] = buf;
   
   // adjust window size
-  _windowArr.push(seqno);  
+  _sendwindow.push(seqno);  
 }
 
 //
-// CTF CONNECTION
+// ctf socket
 //
-ctfConnection = net.createConnection(CTF_PORT, CTF_HOST);
+var _ctfsock = net.createConnection(_config.ctf.port, _config.ctf.host);
 
 /* 
 * ctf connection handlers
 */
 
 // List of CTF commands
-var ctfCommandList = [ 
-	"5022=LoginUser|5028="+CTF_USERID+"|5029="+CTF_PASSWORD+"|5026=1",
+var _ctfCommandList = [ 
+	"5022=LoginUser|5028="+_config.ctf.userid+"|5029="+_config.ctf.password+"|5026=1",
 	"5022=SelectAvailableTokens|5026=5",
 	//"5022=SelectUserTokens|5035=5|5035=308|5035=378|5026=9",
 	//"5022=QuerySnap|4=941|5=E:TCS.EQ|5026=11",
@@ -323,18 +398,18 @@ var ctfCommandList = [
 	//"5022=Subscribe|4=741|5026=12",
 ];
 
-ctfConnection.addListener("connect", function () {
-  console.log("connection is established with ctf server...");
+_ctfsock.addListener("connect", function () {
+  _logger.debug("connection is established with ctf server...");
   //client.setEncoding('ascii');
   
-	ctfCommandList.forEach(function(cmd, pos) {
-		ctfConnection.write(ctf.serialize(cmd));
+	_ctfCommandList.forEach(function(cmd, pos) {
+		_ctfsock.write(ctf.serialize(cmd));
 	});
 	
 	// subscribe to the watchlist
-	securitiesWatchList.forEach(function(sym, pos) {
-	  var cmd = "5022=QuerySnapAndSubscribe|4=741|5="+sym+"|5026="+10+pos;
-		ctfConnection.write(ctf.serialize(cmd));
+	_config.securities.forEach(function(sec, pos) {
+	  var cmd = "5022=QuerySnapAndSubscribe|4=741|5="+sec.IDCTicker+"|5026="+10+pos;
+		_ctfsock.write(ctf.serialize(cmd));
 	});
 	
 });
@@ -353,15 +428,15 @@ var ctfState = EXPECTING_CTF_FRAME_START, // current ctf state
   payloadSizeBuffer = null, // buffer to hold ctf payload size
   payloadSizeBytesLeft = 0; // ctf payload size bytes left to be processed
 
-ctfConnection.addListener("data", function (chunk) {
-  //console.log("data is received from ctf server..." + chunk.toString());
+_ctfsock.addListener("data", function (chunk) {
+  //_logger.debug("data is received from ctf server..." + chunk.toString());
   for (var i = 0; i < chunk.length; i++) {
     switch (ctfState) {
       case EXPECTING_CTF_FRAME_START:
         if (chunk[i] == ctf.FRAME_START) {
           ctfState = EXPECTING_CTF_PROTOCOL_SIGNATURE;
         } else {
-          console.log("Error: expecting ctf start byte, received " + chunk[i]);
+          _logger.debug("Error: expecting ctf start byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -372,7 +447,7 @@ ctfConnection.addListener("data", function (chunk) {
           payloadSizeBuffer = new Buffer(4);
           payloadSizeBytesLeft = 4;
         } else {
-          console.log("Error: expecting ctf protocol signature byte, received " + chunk[i]);
+          _logger.debug("Error: expecting ctf protocol signature byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -383,9 +458,9 @@ ctfConnection.addListener("data", function (chunk) {
 
         if (payloadSizeBytesLeft == 0) {
           // done collecting payload size bytes
-          //console.log(payloadSizeBuffer);
-          var payloadSize = util.toNum(payloadSizeBuffer);
-          //console.log("payload size = ", payloadSize);
+          //_logger.debug(payloadSizeBuffer);
+          var payloadSize = myutil.toNum(payloadSizeBuffer);
+          //_logger.debug("payload size = ", payloadSize);
           payloadBuffer = new Buffer(payloadSize);
           payloadBytesLeft = payloadSize;
           ctfState = EXPECTING_CTF_PAYLOAD;
@@ -395,7 +470,7 @@ ctfConnection.addListener("data", function (chunk) {
       case EXPECTING_CTF_PAYLOAD:
         payloadBuffer[payloadBuffer.length - payloadBytesLeft--] = chunk[i];
         if (payloadBytesLeft == 0) {
-          //console.log("New CTF Message: " + payloadBuffer);
+          //_logger.debug("New CTF Message: " + payloadBuffer);
           ctfState = EXPECTING_CTF_FRAME_END;
         }
       break;
@@ -403,11 +478,11 @@ ctfConnection.addListener("data", function (chunk) {
       case EXPECTING_CTF_FRAME_END:
         if (chunk[i] == ctf.FRAME_END) {
           //lastCTFMessage = payloadBuffer.toString();
-          //console.log("=>" + payloadBuffer.toString());
-          eventEmitter.emit("NewCTFMessage", payloadBuffer);
+          //_logger.debug("=>" + payloadBuffer.toString());
+          _eventemitter.emit("NewCTFMessage", payloadBuffer);
           ctfState = EXPECTING_CTF_FRAME_START;
         } else {
-          console.log("Error: expecting ctf frame end byte, received " + chunk[i]);
+          _logger.debug("Error: expecting ctf frame end byte, received " + chunk[i]);
           // TODO
         }
       break;
@@ -415,25 +490,6 @@ ctfConnection.addListener("data", function (chunk) {
   }
 });
 
-ctfConnection.addListener("end", function () {
-  console.log("ctf server disconnected...");
-});
-
-// global array to collect price messages coming in
-var _inboxArr = new Array();
-
-// emit an event when a new packet arrives from ctf server
-eventEmitter.addListener("NewCTFMessage", function(buf) {
-  //console.log("NewCTFMessage => " + buf.toString());
-
-  var ctfmsg = ctf.toJSONObject(buf.toString());
-  
-  if (ctfmsg['4']) {
-    // quotes...collect them.
-    _inboxArr.push(ctfmsg);
-    console.log("num price messages = " + _inboxArr.length);
-    
-    // try to publish
-    sendPackets();
-  }
+_ctfsock.addListener("end", function () {
+  _logger.debug("ctf server disconnected...");
 });
