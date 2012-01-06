@@ -3,9 +3,11 @@
 
 var util = require('./util'),
 
-	FRAME_START 		= exports.FRAME_START 			= 0x04, // ctf start of frame byte
-	FRAME_END 			= exports.FRAME_END 			= 0x03, // ctf end of frame byte
-	PROTOCOL_SIGNATURE 	= exports.PROTOCOL_SIGNATURE	= 0x20; // ctf protocol signature byte
+	FRAME_START = exports.FRAME_START 			        = 0x04, // ctf start of frame byte
+	FRAME_END = exports.FRAME_END 			            = 0x03, // ctf end of frame byte
+	PROTOCOL_SIGNATURE = exports.PROTOCOL_SIGNATURE	= 0x20; // ctf protocol signature byte
+	PAYLOAD_SIZE = exports.PAYLOADSIZE              = 0x21; // ctf payload size (dummy - used as a state for parsing)
+	PAYLOAD = exports.PAYLOAD                       = 0x22; // ctf payload (dummy - used as a state for parsing)
 	
 /**
  * serialize(string)

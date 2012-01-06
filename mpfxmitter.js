@@ -96,13 +96,13 @@ var _outboxarr = new Array();
 // global array to keep track of the send window size...contains seqnos
 var _mpfwindow = new Array();
 
-// id for ack/nak timeouts
+// global id for ack/nak timeouts
 var _timeoutid = null;
 
+// global seqence number, starts from 33 and wraps around at 127
+var _seqno = 32;
 
-//
 // event emitter
-//
 var _eventemitter = new events.EventEmitter();
 
 // emit an event when a new packet arrives from ctf server
@@ -237,7 +237,6 @@ function resetSeqNo() {
 /*
  * Increment the global sequence number.
  */
-var _seqno = 32;
 function nextSeqNo() {
    if (_seqno == 127) {
      // wrap around to 32
@@ -424,15 +423,8 @@ _ctfsock.addListener("connect", function () {
 	});
 });
 
-// ctf message parser states...
-var EXPECTING_CTF_FRAME_START = 1,
-    EXPECTING_CTF_PROTOCOL_SIGNATURE = 2,
-    EXPECTING_CTF_PAYLOAD_SIZE = 3,
-    EXPECTING_CTF_PAYLOAD = 4,
-    EXPECTING_CTF_FRAME_END = 5;
-
 // ctf message parsing...
-var ctfState = EXPECTING_CTF_FRAME_START, // current ctf state
+var ctfState = ctf.FRAME_START, // current ctf state
   payloadBuffer = null, // buffer to hold ctf payload
   payloadBytesLeft = 0, // ctf payload bytes left to be processed
   payloadSizeBuffer = null, // buffer to hold ctf payload size
@@ -442,18 +434,18 @@ _ctfsock.addListener("data", function (chunk) {
   _logger.debug("data is received from ctf server..." + chunk.toString());
   for (var i = 0; i < chunk.length; i++) {
     switch (ctfState) {
-      case EXPECTING_CTF_FRAME_START:
+      case ctf.FRAME_START:
         if (chunk[i] == ctf.FRAME_START) {
-          ctfState = EXPECTING_CTF_PROTOCOL_SIGNATURE;
+          ctfState = ctf.PROTOCOL_SIGNATURE;
         } else {
           _logger.error("Error: expecting ctf start byte, received " + chunk[i]);
           // TODO
         }
       break;
 
-      case EXPECTING_CTF_PROTOCOL_SIGNATURE:
+      case ctf.PROTOCOL_SIGNATURE:
         if (chunk[i] == ctf.PROTOCOL_SIGNATURE) {
-          ctfState = EXPECTING_CTF_PAYLOAD_SIZE;
+          ctfState = ctf.PAYLOAD_SIZE;
           payloadSizeBuffer = new Buffer(4);
           payloadSizeBytesLeft = 4;
         } else {
@@ -462,7 +454,7 @@ _ctfsock.addListener("data", function (chunk) {
         }
       break;
 
-      case EXPECTING_CTF_PAYLOAD_SIZE:
+      case ctf.PAYLOAD_SIZE:
         // continute to collect payload size bytes
         payloadSizeBuffer[payloadSizeBuffer.length - payloadSizeBytesLeft--] = chunk[i];
 
@@ -473,23 +465,23 @@ _ctfsock.addListener("data", function (chunk) {
           _logger.debug("ctf payload size = ", payloadSize);
           payloadBuffer = new Buffer(payloadSize);
           payloadBytesLeft = payloadSize;
-          ctfState = EXPECTING_CTF_PAYLOAD;
+          ctfState = ctf.PAYLOAD;
         }
       break;
 
-      case EXPECTING_CTF_PAYLOAD:
+      case ctf.PAYLOAD:
         payloadBuffer[payloadBuffer.length - payloadBytesLeft--] = chunk[i];
         if (payloadBytesLeft == 0) {
           _logger.debug("New CTF Message: " + payloadBuffer);
-          ctfState = EXPECTING_CTF_FRAME_END;
+          ctfState = ctf.FRAME_END;
         }
       break;
 
-      case EXPECTING_CTF_FRAME_END:
+      case ctf.FRAME_END:
         if (chunk[i] == ctf.FRAME_END) {
           _logger.debug("ctf payload =" + payloadBuffer.toString());
           _eventemitter.emit("NewCTFMessage", payloadBuffer);
-          ctfState = EXPECTING_CTF_FRAME_START;
+          ctfState = ctf.FRAME_START;
         } else {
           _logger.error("Error: expecting ctf frame end byte, received " + chunk[i]);
           // TODO
