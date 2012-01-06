@@ -94,7 +94,7 @@ var _inboxarr = new Array();
 var _outboxarr = new Array();
 
 // global array to keep track of the send window size...contains seqnos
-var _sendwindow = new Array();
+var _mpfwindow = new Array();
 
 // id for ack/nak timeouts
 var _timeoutid = null;
@@ -183,10 +183,10 @@ function processAck(seqno) {
     clearTimeout(_timeoutid);
 
     // adjust the outbox window
-    _logger.debug("processAck: window array = " + _sendwindow);
-    var inx = _sendwindow.indexOf(seqno);
-    _sendwindow = _sendwindow.splice(++inx);
-    _logger.debug("processAck: window array = " + _sendwindow);
+    _logger.debug("processAck: window array = " + _mpfwindow);
+    var inx = _mpfwindow.indexOf(seqno);
+    _mpfwindow = _mpfwindow.splice(++inx);
+    _logger.debug("processAck: window array = " + _mpfwindow);
   }
   
   // continue publishing
@@ -202,6 +202,7 @@ function processNak(seqno) {
   
   // clear timeout
   clearTimeout(_timeoutid);
+  _logger.debug("processNak: Timeout cleared");
   
   if (++_nakcnt == _mpfNakLimit) {
     // nak count exceeded max allowed limit
@@ -210,10 +211,10 @@ function processNak(seqno) {
     _nakcnt = 0;
   } else {
     // adjust the outbox window
-    _logger.debug("processNak: window array = " + _sendwindow);
-    var inx = _sendwindow.indexOf(prevSeqNo(seqno));
-    _sendwindow = _sendwindow.splice(++inx);
-    _logger.debug("processNak: window array = " + _sendwindow);
+    _logger.debug("processNak: window array = " + _mpfwindow);
+    var inx = _mpfwindow.indexOf(prevSeqNo(seqno));
+    _mpfwindow = _mpfwindow.splice(++inx);
+    _logger.debug("processNak: window array = " + _mpfwindow);
 
     // retransmit
     retransmit();
@@ -264,11 +265,11 @@ function sendHeartbeat () {
     return;
   }  
   
-  if (_sendwindow.length < _prop.mpf.windowsize) {
+  if (_mpfwindow.length < _prop.mpf.windowsize) {
     var seqno = nextSeqNo();
     buf = mpf.createType5Packet(seqno, _prop.mpf.bankcode);
     xmitmpf(seqno, buf);    
-    if (_sendwindow.length == _prop.mpf.windowsize) {
+    if (_mpfwindow.length == _prop.mpf.windowsize) {
       // no more publishing possible, set timeout for an ack or nak
       _logger.debug("sendHeartbeat: setting timeout for ack/nak after window size reached 0");
       _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
@@ -289,9 +290,9 @@ function sendPackets() {
   }
   
   // check window size and inbox for messages
-  while ( _sendwindow.length < _prop.mpf.windowsize && _inboxarr.length != 0 ) {
+  while ( _mpfwindow.length < _prop.mpf.windowsize && _inboxarr.length != 0 ) {
     if ( sendPrices(_inboxarr.shift()) ) {
-      if (_sendwindow.length == _prop.mpf.windowsize) {
+      if (_mpfwindow.length == _prop.mpf.windowsize) {
         // no more publishing possible, set timeout for an ack or nak
         _logger.debug("sendPackets: setting timeout for ack/nak after window size reached 0");
         _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
@@ -315,7 +316,7 @@ function processTimeout() {
 function retransmit () {
   _logger.debug("retransmit: entered");
   // send the packets from outbox again
-  _sendwindow.forEach(function (seqno, pos) {
+  _mpfwindow.forEach(function (seqno, pos) {
     _logger.debug("retransmit: packet with seqno " + seqno + " => <" + buf.toString('hex') + ">");
     _mpfsock.write(_outboxarr[seqno]);
   });
@@ -389,7 +390,7 @@ function xmitmpf(seqno, buf) {
   _outboxarr[seqno] = buf;
   
   // adjust window size
-  _sendwindow.push(seqno);  
+  _mpfwindow.push(seqno);  
 }
 
 //

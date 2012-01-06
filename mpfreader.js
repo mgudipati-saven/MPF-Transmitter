@@ -8,7 +8,7 @@ var server = net.createServer(function (stream) {
   var eventEmitter = new events.EventEmitter();
 
   // window size
-  var windowsize = 7;
+  var windowsize = 8;
   
   // emit an event when a new packet arrives from a client
   eventEmitter.addListener("NewMPFPacket", function(buf) {
