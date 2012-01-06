@@ -320,8 +320,14 @@ function retransmit () {
     _mpfsock.write(_outboxarr[seqno]);
   });
 
-  // send more packets if inbox has any and window is empty
-  sendPackets();
+  // send more packets if inbox has any and window is empty, else set timeout for ack/nak
+  if (_mpfwindow.length == _prop.mpf.windowsize) {
+    // no more publishing possible, set timeout for an ack or nak
+    _logger.debug("sendPackets: setting timeout for ack/nak after window size reached 0");
+    _timeoutid = setTimeout(processTimeout, 1000 * _prop.mpf.timeout);
+  } else {
+    sendPackets();
+  }
 }
 
 // finds a security record in the config securities array

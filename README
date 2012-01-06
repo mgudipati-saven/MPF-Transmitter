@@ -8,6 +8,9 @@
 	1.2=When an Ack is received:
 	  1.2, clear the 10 sec timeout
 	  1.3, transmit new packets, if any
+	1.4=When Ack timeout:
+	  1.4, retransmit, start the 10 sec timer again.
+	  1.5, reset seqno if num retransmissions exceeds a certain limit
 	
 	[2.Nak]
 	2.1=When a Nak is received:
@@ -23,7 +26,7 @@
 	  3.2, skip heartbeat
 	
 	[4.Type 2 Packet]
-	4.1=Send type 2 packet
+	4.1=Send type 2 packet if the data for the required transactions or tokens is available
 	
 	[5.Reset]
 	5.1=When a reset is sent:
