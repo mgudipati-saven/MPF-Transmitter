@@ -96,8 +96,11 @@ var _outboxarr = new Array();
 // global array to keep track of the send window size...contains seqnos
 var _mpfwindow = new Array();
 
-// global id for ack/nak timeouts
+// global id for ack/nak timer
 var _timeoutid = null;
+
+// global id for heartbeat timer
+var _intervalid = null;
 
 // global seqence number, starts from 33 and wraps around at 127
 var _seqno = 32;
@@ -143,18 +146,21 @@ _eventemitter.addListener("NewMPFPacket", function(buf) {
 //
 var _mpfsock = net.createConnection(_prop.mpf.port, _prop.mpf.host, function () {
   _logger.info("connection is established with mpf server...");
-  
+  initmpf();
+});
+
+// Initialize MPF connection
+function initmpf () {
+  // clear the current heartbeat timer
+  clearInterval(_intervalid);
+
   // start the heartbeat timer
   setInterval(sendHeartbeat, 1000 * _prop.mpf.heartbeatinterval);
-
-  // start the publish timer
-  //setInterval(sendPackets, 1000 * _mpfPublishInterval);
-});
+}
 
 /* 
  * mpf connection handlers
  */
-
 var laststate = mpf.MPF_FRAME_START,
     lastarr = new Array();
 _mpfsock.addListener("data", function (chunk) {
@@ -165,8 +171,11 @@ _mpfsock.addListener("data", function (chunk) {
 });
 
 _mpfsock.addListener("end", function () {
-  _logger.error("mpf server disconnected...");
-  //TODO...attempt reconnection
+  _logger.error("mpf server disconnected, attempting reconnection...");
+  _mpfsock = net.createConnection(_prop.mpf.port, _prop.mpf.host, function () {
+    _logger.info("connection is established with mpf server...");
+    initmpf();
+  });
 });
 
 /*
