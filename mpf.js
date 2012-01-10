@@ -85,9 +85,14 @@ Client.prototype.sendPacket = function(data) {
     case MPF_PACKET_TYPE_ACK:
       buf = createACKPacket(data);
     break;
+    
+    case MPF_PACKET_TYPE_2:
+      buf = createType2Packet(data);
+    break;
   }
   
   if (buf) {
+    console.log("sendPacket: buf: <" + buf.toString('hex') + ">");
     self._sock.write(buf);
   }
 }
@@ -127,41 +132,41 @@ function createType5Packet (data) {
  *
  */
 function createType2Packet (data) {
-  buf = new Buffer(38 + 15 * data.num);
+  buf = new Buffer(37 + 15 * data.Transactions.length);
 
   var offset = 0;
   buf[offset++] = MPF_FRAME_START;                                    // start of transmission
   buf[offset++] = MPF_PACKET_TYPE_2;                                  // packet type
   buf[offset++] = data.SeqNo;                                              // sequence number
 
-  buf.write(data.rectype, offset, 2, 'ascii');                             // record type
+  buf.write(data.RecordType, offset, 2, 'ascii');                             // record type e.g. '70' for Bond
   offset += 2;
 
-  buf.write(data.srcid, offset, 7, 'ascii');                               // source id
+  buf.write(data.SourceID, offset, 7, 'ascii');                               // source id e.g. 'NYSIDCO'
   offset += 7
 
-  buf.write(data.time, offset, 8, 'ascii')                                 // time in HH:MM:SS GMT
+  buf.write(data.TimeStamp, offset, 8, 'ascii')                                 // time in HH:MM:SS GMT
   offset += 8;
 
-  buf.write(data.idtype, offset++, 1, 'ascii');                            // security identifier type
+  buf.write(data.SecurityIDType, offset++, 1, 'ascii');                            // security identifier type
 
-  var securityid = myutil.ljust(data.id, ' ', 12);
+  var securityid = myutil.ljust(data.SecurityID, ' ', 12);
   //console.log("security identifier = <" + securityid + ">");
   buf.write(securityid, offset, 12, 'ascii');                         // security identifier
   offset += 12;
 
-  buf.write("%02d".printf(data.num), offset);                              // number of instances or tansactions
+  buf.write("%02d".printf(data.Transactions.length), offset);                              // number of instances or tansactions
   offset += 2;
 
-  for (var item in data.data) {
-    buf.write(item, offset++, 1, 'ascii');                            // transaction type
-    var val = myutil.rjust(data.data[item], ' ', 14);
-    //console.log("data for transaction " + item + " = <" + val + ">");
+  console.log("createType2Packet: Transactions: " + JSON.stringify(data.Transactions));
+  data.Transactions.forEach (function(item) {
+    console.log("createType2Packet: item: " + JSON.stringify(item));
+    buf.write(item.Type, offset++, 1, 'ascii');                            // transaction type
+    var val = myutil.rjust(item.Value, ' ', 14);
     buf.write(val, offset, 14, 'ascii');                              // data
     offset += 14;
-  }
+  });
   
-  buf[offset++] = data.cond;                                               // condition code
   buf[offset++] = MPF_FRAME_END;                                      // end of transmission
   
   buf[offset] = myutil.computeLRC( buf, 1, offset-1 );// compute lrc
