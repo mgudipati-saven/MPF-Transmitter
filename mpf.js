@@ -1,116 +1,188 @@
+/**
+ * Multi Product Feed
+ * 
+ * @author Murty Gudipati
+ * @version 1.0
+ * 
+ * copyright 2012, Saven Technologies, Inc
+ * 
+ */
+var net = require('net'),
+    events = require('events'),
+    util = require('util'), 
+    myutil = require('./util'),
+    
+  	MPF_FRAME_START = exports.MPF_FRAME_START = 0x02,         // start of transmission
+  	MPF_FRAME_END = exports.MPF_FRAME_END = 0x03,             // end of transmission
+  	MPF_LRC = 1,                                              // lrc
+  	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25,     // packet type 5
+  	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22,     // packet type 2
+  	MPF_PACKET_TYPE_ACK = exports.MPF_PACKET_TYPE_ACK = 0x06, // positive acknowledgement packet
+  	MPF_PACKET_TYPE_NAK = exports.MPF_PACKET_TYPE_NAK = 0x15; // negative acknowledgement packet
+
 /*
+ * MPF Client class
  */
 
-var util = require('./util'),
+/**
+ * MPF Client constructor
+ * 
+ * @param {Socket} stream
+ * 		The feed's socket stream
+ */
+function Client(stream) {
+	this._sock = stream;
 
-	MPF_FRAME_START = exports.MPF_FRAME_START = 0x02, // start of transmission
-	MPF_FRAME_END = exports.MPF_FRAME_END = 0x03, // end of transmission
-	MPF_LRC = 1, // lrc
-	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25, // packet type 5
-	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22, // packet type 2
-	MPF_PACKET_TYPE_ACK = exports.MPF_PACKET_TYPE_ACK = 0x06, // positive acknowledgement packet
-	MPF_PACKET_TYPE_NAK = exports.MPF_PACKET_TYPE_NAK = 0x15; // negative acknowledgement packet
-	
+  // event emitter
+	events.EventEmitter.call(this);
+}
+util.inherits(Client, events.EventEmitter);
+
+/**
+ * createClient
+ *    Creates a new instance of the client object attached to the stream
+ *
+ * @param {Socket} stream
+ * 		The feed's socket stream
+ *
+ * @return {Client} 
+ *    A new instance of the MPF Client object
+ *
+ * @access public
+ */
+exports.createClient = function (stream) {
+  var c = new Client(stream);
+
+  // initialize feed parser
+  c._state = 0x02;
+  stream.on('data', function (chunk) {
+    console.log("data is received from mpf stream <= " + chunk.toString('hex'));
+    c.deserialize(chunk);
+  });
+
+  return c;
+}
+
+/**
+ * sendPacket
+ *    Sends an mpf packet on the wire
+ *
+ * @param {JSON} data
+ *    JSON data
+ *
+ * @access public
+ */
+Client.prototype.sendPacket = function(data) {
+  console.log("sendPacket: " + JSON.stringify(data));
+  var self = this,
+      buf = null;
+
+  switch (data.PacketType) {
+    case MPF_PACKET_TYPE_5:
+      buf = createType5Packet(data);
+    break;
+    
+    case MPF_PACKET_TYPE_ACK:
+      buf = createACKPacket(data);
+    break;
+  }
+  
+  if (buf) {
+    self._sock.write(buf);
+  }
+}
+
 /**
  * createType5Packet
- * Creates an mpf packet of type 5 for heartbeats.
+ *    Creates an mpf packet of type 5 for heartbeats.
  *
- * @param       int     sequence number
- * @param       string  banker code
- * @return      buffer  heartbeat packet
- * @access      public
+ * @param {JSON} data
+ * 		The JSON data
+ *
+ * @return  {Buffer}  
+ *    The heartbeat packet
  */
-exports.createType5Packet = function createType5Packet (seqno, code) {
+function createType5Packet (data) {
   buf = new Buffer(10);
-  buf[0] = MPF_FRAME_START;       // start of transmission
-  buf[1] = MPF_PACKET_TYPE_5;     // packet type
-  buf[2] = seqno;                 // sequence number
-  buf[3] = 0x20;                  // reserved for future use
-  buf.write(code, 4, 4, 'ascii'); // broker bank code
-  buf[8] = MPF_FRAME_END;         // end of transmission
-  
-  // compute lrc
-  buf[9] = util.computeLRC( buf, 1, 8 );
-  
+  buf[0] = MPF_FRAME_START;                 // start of transmission
+  buf[1] = MPF_PACKET_TYPE_5;               // packet type
+  buf[2] = data.SeqNo;                      // sequence number
+  buf[3] = 0x20;                            // reserved for future use
+  buf.write(data.BankCode, 4, 4, 'ascii');  // broker bank code
+  buf[8] = MPF_FRAME_END;                   // end of transmission
+  buf[9] = myutil.computeLRC(buf, 1, 8);    // compute lrc
+
 	return buf;
 }
 
 /**
  * createType2Packet
- * Creates an mpf packet of type 2 for prices.
+ *    Creates an mpf packet of type 2 for prices.
  *
- * @param       int     sequence number
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @param       string  banker code
- * @return      buffer  type 2 packet
- * @access      public
+ * @param {JSON} data
+ *    The JSON formatted price data
+ *
+ * @return {Buffer}
+ *    type 2 packet
+ *
  */
-exports.createType2Packet = function createType2Packet (seqno, rectype, srcid, time, idtype, id, num, data, cond) {
-  buf = new Buffer(38 + 15 * num);
+function createType2Packet (data) {
+  buf = new Buffer(38 + 15 * data.num);
 
   var offset = 0;
   buf[offset++] = MPF_FRAME_START;                                    // start of transmission
   buf[offset++] = MPF_PACKET_TYPE_2;                                  // packet type
-  buf[offset++] = seqno;                                              // sequence number
+  buf[offset++] = data.SeqNo;                                              // sequence number
 
-  buf.write(rectype, offset, 2, 'ascii');                             // record type
+  buf.write(data.rectype, offset, 2, 'ascii');                             // record type
   offset += 2;
 
-  buf.write(srcid, offset, 7, 'ascii');                               // source id
+  buf.write(data.srcid, offset, 7, 'ascii');                               // source id
   offset += 7
 
-  buf.write(time, offset, 8, 'ascii')                                 // time in HH:MM:SS GMT
+  buf.write(data.time, offset, 8, 'ascii')                                 // time in HH:MM:SS GMT
   offset += 8;
 
-  buf.write(idtype, offset++, 1, 'ascii');                            // security identifier type
+  buf.write(data.idtype, offset++, 1, 'ascii');                            // security identifier type
 
-  var securityid = util.ljust(id, ' ', 12);
+  var securityid = myutil.ljust(data.id, ' ', 12);
   //console.log("security identifier = <" + securityid + ">");
   buf.write(securityid, offset, 12, 'ascii');                         // security identifier
   offset += 12;
 
-  buf.write("%02d".printf(num), offset);                              // number of instances or tansactions
+  buf.write("%02d".printf(data.num), offset);                              // number of instances or tansactions
   offset += 2;
 
-  for (var item in data) {
+  for (var item in data.data) {
     buf.write(item, offset++, 1, 'ascii');                            // transaction type
-    var val = util.rjust(data[item], ' ', 14);
+    var val = myutil.rjust(data.data[item], ' ', 14);
     //console.log("data for transaction " + item + " = <" + val + ">");
     buf.write(val, offset, 14, 'ascii');                              // data
     offset += 14;
   }
   
-  buf[offset++] = cond;                                               // condition code
+  buf[offset++] = data.cond;                                               // condition code
   buf[offset++] = MPF_FRAME_END;                                      // end of transmission
   
-  // compute lrc
-  buf[offset] = util.computeLRC( buf, 1, offset-1 );
-  
+  buf[offset] = myutil.computeLRC( buf, 1, offset-1 );// compute lrc
+
 	return buf;
 }
 
 /**
  * createResetPacket
- * Creates an mpf reset packet of with seqno 32.
+ *    Creates an mpf reset packet of with seqno 32.
  *
- * @return      buffer  reset packet
- * @access      public
+ * @return {Buffer} 
+ *    reset packet
  */
-exports.createResetPacket = function createResetPacket () {
+function createResetPacket () {
   buf = new Buffer(5);
-  buf[0] = MPF_FRAME_START;       // start of transmission
-  buf[1] = MPF_PACKET_TYPE_2;     // packet type
-  buf[2] = 32;                    // sequence number
-  buf[3] = MPF_FRAME_END;         // end of transmission
-  
-  // compute lrc
-  buf[4] = util.computeLRC( buf, 1, 3 );
+  buf[0] = MPF_FRAME_START;               // start of transmission
+  buf[1] = MPF_PACKET_TYPE_2;             // packet type
+  buf[2] = 32;                            // sequence number
+  buf[3] = MPF_FRAME_END;                 // end of transmission
+  buf[4] = myutil.computeLRC(buf, 1, 3);  // compute lrc
   
 	return buf;
 }
@@ -119,19 +191,19 @@ exports.createResetPacket = function createResetPacket () {
  * createACKPacket
  * Creates an mpf packet of type <ACK> for positive acknowledgement.
  *
- * @param       int     sequence number
- * @return      buffer  positive acknowledgement packet
- * @access      public
+ * @param {Number} seqno
+ * 		The sequence number of the packet to be acknowledged
+ *
+ * @return  {Buffer}  
+ *    The ack packet
  */
-exports.createACKPacket = function createACKPacket (seqno) {
+function createACKPacket (seqno) {
   buf = new Buffer(5);
-  buf[0] = MPF_FRAME_START;       // start of transmission
-  buf[1] = MPF_PACKET_TYPE_ACK;   // packet type
-  buf[2] = seqno;                 // sequence number
-  buf[3] = MPF_FRAME_END;         // end of transmission
-  
-  // compute lrc
-  buf[4] = util.computeLRC( buf, 1, 3 );
+  buf[0] = MPF_FRAME_START;               // start of transmission
+  buf[1] = MPF_PACKET_TYPE_ACK;           // packet type
+  buf[2] = seqno;                         // sequence number
+  buf[3] = MPF_FRAME_END;                 // end of transmission
+  buf[4] = myutil.computeLRC(buf, 1, 3);  // compute lrc
   
 	return buf;
 }
@@ -140,63 +212,64 @@ exports.createACKPacket = function createACKPacket (seqno) {
  * createNAKPacket
  * Creates an mpf packet of type <NAK> for negative acknowledgement.
  *
- * @param       int     sequence number
- * @return      buffer  negative acknowledgement packet
- * @access      public
+ * @param {Number} seqno
+ * 		The sequence number of the packet to be acknowledged
+ *
+ * @return  {Buffer}  
+ *    The nak packet
  */
-exports.createNAKPacket = function createNAKPacket (seqno) {
+function createNAKPacket (seqno) {
   buf = new Buffer(5);
-  buf[0] = MPF_FRAME_START;       // start of transmission
-  buf[1] = MPF_PACKET_TYPE_NAK;   // packet type
-  buf[2] = seqno;                 // sequence number
-  buf[3] = MPF_FRAME_END;         // end of transmission
-  
-  // compute lrc
-  buf[4] = util.computeLRC( buf, 1, 3 );
+  buf[0] = MPF_FRAME_START;                 // start of transmission
+  buf[1] = MPF_PACKET_TYPE_NAK;             // packet type
+  buf[2] = seqno;                           // sequence number
+  buf[3] = MPF_FRAME_END;                   // end of transmission  
+  buf[4] = myutil.computeLRC( buf, 1, 3 );  // compute lrc
   
 	return buf;
 }
 
 /**
- * parse
- * Parses an MPF Packet.
+ * toJSON
+ *    Creates a JSON object out of an mpf packet.
  *
- * @param       buffer  mpf packet
- * @return      json    json formatted mpf data
- * @access      public
+ * @param {Buffer}  buf
+ *    The mpf packet
+ * 
+ * @return {JSON} 
+ *    JSON formatted mpf data
  */
-exports.parse = function parse (buf) {
-  mpfmsg = {};
+function toJSON (buf) {
+  var json = {};
   
   // header
   if (buf[1]) {
-    mpfmsg.packettype = buf[1];    
+    json.PacketType = buf[1];    
   }
+  
   if (buf[2]) {
-    mpfmsg.seqno = buf[2];    
+    json.SeqNo = buf[2];    
   }
 
-  return mpfmsg;
+  return json;
 }
 
 /**
  * deserialize
- * deserializes mpf packets from partial byte stream.
+ *    deserializes mpf packets from partial byte stream.
  *
- * @param       buffer          mpf bytes
- * @param       state           state of mpf packet read so far
- * @param       array           source array to fill
- * @param       callback        function to call when a complete mpf packet is ready
- * @return      array           array of mpf octets
+ * @param {Buffer} buf
+ *    source mpf bytes read from the stream
+ * 
  * @access      public
  */
-exports.deserialize = function pack (buf, mpfstate, mpfarr, cb) {
+Client.prototype.deserialize = function (buf) {
   for (var i = 0; i < buf.length; i++) {
-    switch (mpfstate) {
+    switch (this._state) {
       case MPF_FRAME_START:
         if (buf[i] == MPF_FRAME_START) {
-          mpfstate = MPF_FRAME_END;
-          mpfarr = new Array();
+          this._state = MPF_FRAME_END;
+          this._packet = [];
         } else {
           console.log("Error: expecting mpf start of transmission, received " + buf[i]);
           // TODO
@@ -205,18 +278,15 @@ exports.deserialize = function pack (buf, mpfstate, mpfarr, cb) {
       
       case MPF_FRAME_END:
         if (buf[i] == MPF_FRAME_END) {
-          mpfstate = MPF_LRC;
+          this._state = MPF_LRC;
         }        
       break;
 
       case MPF_LRC:
-        lrc = util.computeLRC(mpfarr, 1, mpfarr.length-1);
+        lrc = myutil.computeLRC(this._packet, 1, this._packet.length-1);
         if (buf[i] == lrc) {
-          if (cb && typeof(cb) === 'function') {
-              // execute the callback
-              cb(mpfarr);
-          }
-          mpfstate = MPF_FRAME_START;
+          this.emit('packet', toJSON(this._packet));
+          this._state = MPF_FRAME_START;
         } else {
           console.log("Error: LRC Failed!! " + lrc + " != " + buf[i]);
           // TODO
@@ -225,8 +295,6 @@ exports.deserialize = function pack (buf, mpfstate, mpfarr, cb) {
     }
     
     // copy the byte into mpf array
-    mpfarr.push(buf[i]);
+    this._packet.push(buf[i]);
   }
-  
-  return mpfstate;
 }
