@@ -264,9 +264,9 @@ function toJSON (buf) {
  *    deserializes mpf packets from partial byte stream.
  *
  * @param {Buffer} buf
- *    source mpf bytes read from the stream
+ *    mpf bytes read from the stream
  * 
- * @access      public
+ * @access public
  */
 Client.prototype.deserialize = function (buf) {
   for (var i = 0; i < buf.length; i++) {

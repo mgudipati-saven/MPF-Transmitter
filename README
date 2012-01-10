@@ -43,3 +43,24 @@
 	7.2=Reconnect:
 	  7.2, when disconnected, attempt to reconnect
 	  7.3, reset seqno
+	  
+[MPF Packets]
+Type 5 = {
+  PacketType:   0x25,
+  SeqNo:        33
+}
+
+Type 2 = {
+  PacketType:     0x22,
+  SeqNo:          33,
+  RecordType:     70,                             ;Bond
+  SourceID:       'NYSIDCO',
+  TimeStamp:      '09:22:11',                     ;HH:MM:SS GMT
+  SecurityIDType: 4,                              ;Ticker Symbol         
+  SecurityID:     IHDCIV,
+  Transactions:   [ { Type: 'T', Value: 100.00},
+                    { Type: 'A', Value: 102.50},
+                    { Type: 'B', Value: 101.00}
+                  ],
+  ConditionCode:  01
+}
