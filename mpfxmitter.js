@@ -137,7 +137,7 @@ function initMPF () {
    
    // register message listener
     _mpfClient.on('packet', function(packet) {
-      _logger.info("new mpf packet received: " + JSON.stringify(packet));
+      _logger.debug("new mpf packet received: " + JSON.stringify(packet));
 
      	switch (packet.PacketType) {
      	  case mpf.MPF_PACKET_TYPE_ACK:
@@ -220,10 +220,7 @@ function processAck(seqno) {
     clearTimeout(_timeoutId);
 
     // adjust the send queue window
-    _logger.debug("processAck: window array = " + _sendWindow);
-    var inx = _sendWindow.indexOf(seqno);
-    _sendWindow = _sendWindow.splice(++inx);
-    _logger.debug("processAck: window array = " + _sendWindow);
+    adjustSendWindow(seqno);
   }
   
   // continue publishing
@@ -247,13 +244,26 @@ function processNak(seqno) {
     _nakCount = 0;
   } else {
     // adjust the send queue window
-    _logger.debug("processNak: window array = " + _sendWindow);
-    var inx = _sendWindow.indexOf(prevSeqNo(seqno));
-    _sendWindow = _sendWindow.splice(++inx);
-    _logger.debug("processNak: window array = " + _sendWindow);
-
+    adjustSendWindow(prevSeqNo(seqno));
+    
     // retransmit
     retransmit();
+  }
+}
+
+function adjustSendWindow(seqno) {
+  _logger.debug("adjustSendWindow: send queue = " + _sendQueue);
+  var inx = -1;
+  for (var i=0; i<_sendQueue.length; i++) {
+    var packet = _sendQueue[i];
+    if (packet.SeqNo == seqno) {
+      inx = i;
+      break;
+    }
+  }
+  if (inx) {
+    _sendQueue = _sendQueue.splice(++inx);
+    _logger.debug("adjustSendWindow: send queue = " + _sendQueue);
   }
 }
 

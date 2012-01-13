@@ -33,6 +33,8 @@ var net = require('net'),
 function Client(stream) {
 	this._sock = stream;
 
+  this._state = MPF_FRAME_START;   // current ctf state
+  
   // event emitter
 	events.EventEmitter.call(this);
 }
@@ -54,7 +56,6 @@ exports.createClient = function (stream) {
   var c = new Client(stream);
 
   // initialize feed parser
-  c._state = 0x02;
   stream.on('data', function (chunk) {
     console.log("data is received from mpf stream <= " + chunk.toString('hex'));
     c.deserialize(chunk);
@@ -83,7 +84,7 @@ Client.prototype.sendPacket = function(data) {
     break;
     
     case MPF_PACKET_TYPE_ACK:
-      buf = createACKPacket(data);
+      buf = createACKPacket(data.SeqNo);
     break;
     
     case MPF_PACKET_TYPE_2:
@@ -269,9 +270,11 @@ function toJSON (buf) {
  * @access public
  */
 Client.prototype.deserialize = function (buf) {
+  console.log("deserialize: " + buf.toString('hex'));
   for (var i = 0; i < buf.length; i++) {
     switch (this._state) {
       case MPF_FRAME_START:
+        console.log("mpf frame start");
         if (buf[i] == MPF_FRAME_START) {
           this._state = MPF_FRAME_END;
           this._packet = [];
@@ -282,14 +285,17 @@ Client.prototype.deserialize = function (buf) {
       break;
       
       case MPF_FRAME_END:
+      console.log("mpf frame end");
         if (buf[i] == MPF_FRAME_END) {
           this._state = MPF_LRC;
         }        
       break;
 
       case MPF_LRC:
+        console.log("mpf lrc");
         lrc = myutil.computeLRC(this._packet, 1, this._packet.length-1);
         if (buf[i] == lrc) {
+          console.log("emtting packet event for new mpf packet: " + JSON.stringify(toJSON(this._packet)));
           this.emit('packet', toJSON(this._packet));
           this._state = MPF_FRAME_START;
         } else {
