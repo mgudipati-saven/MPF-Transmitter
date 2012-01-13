@@ -252,7 +252,7 @@ function processNak(seqno) {
 }
 
 function adjustSendWindow(seqno) {
-  _logger.debug("adjustSendWindow: send queue = " + _sendQueue);
+  _logger.debug("adjustSendWindow: send queue = " + JSON.stringify(_sendQueue));
   var inx = -1;
   for (var i=0; i<_sendQueue.length; i++) {
     var packet = _sendQueue[i];
@@ -263,7 +263,7 @@ function adjustSendWindow(seqno) {
   }
   if (inx) {
     _sendQueue = _sendQueue.splice(++inx);
-    _logger.debug("adjustSendWindow: send queue = " + _sendQueue);
+    _logger.debug("adjustSendWindow: send queue = " + JSON.stringify(_sendQueue));
   }
 }
 

@@ -5,15 +5,11 @@ var util = require('util'),
     events = require('events'),
     net = require('net'),
 
-	FRAME_START = exports.FRAME_START 			        = 0x04, // ctf start of frame byte
-	FRAME_END = exports.FRAME_END 			            = 0x03, // ctf end of frame byte
-	PROTOCOL_SIGNATURE = exports.PROTOCOL_SIGNATURE	= 0x20; // ctf protocol signature byte
-	PAYLOAD_SIZE = exports.PAYLOADSIZE              = 0x21; // ctf payload size (dummy - used as a state for parsing)
-	PAYLOAD = exports.PAYLOAD                       = 0x22; // ctf payload (dummy - used as a state for parsing)
-
-/*
- * CTF Client class
- */
+  	CTF_FRAME_START = exports.FRAME_START 			        = 0x04, // ctf start of frame byte
+  	CTF_FRAME_END = exports.FRAME_END 			            = 0x03, // ctf end of frame byte
+  	CTF_PROTOCOL_SIGNATURE = exports.PROTOCOL_SIGNATURE	= 0x20; // ctf protocol signature byte
+  	CTF_PAYLOAD_SIZE = exports.PAYLOADSIZE              = 0x21; // ctf payload size (dummy - used as a state for parsing)
+  	CTF_PAYLOAD = exports.PAYLOAD                       = 0x22; // ctf payload (dummy - used as a state for parsing)
 
 /**
  * CTF Client constructor
@@ -24,7 +20,7 @@ var util = require('util'),
 function Client(stream) {
 	this._sock = stream;
 
-  this._ctfState = FRAME_START;   // current ctf state
+  this._ctfState = CTF_FRAME_START;   // current ctf state
   this._payloadBuffer = null;     // buffer to hold ctf payload
   this._payloadBytesLeft = 0;     // ctf payload bytes left to be processed
   this._payloadSizeBuffer = null; // buffer to hold ctf payload size
@@ -51,7 +47,6 @@ exports.createClient = function (stream) {
 
   // deserialization setup
   stream.on('data', function (chunk) {
-    console.log("data is received from ctf stream <= " + chunk);
     c.deserialize(chunk);
   });
 
@@ -68,20 +63,19 @@ exports.createClient = function (stream) {
  * @access public
  */
 Client.prototype.deserialize = function (chunk) {  
-  console.log("deserialize: " + chunk.toString('hex'));
   for (var i = 0; i < chunk.length; i++) {
     switch (this._ctfState) {
-      case 0x04: // start of a new ctf frame
-        if (chunk[i] == 0x04) {
-          this._ctfState = 0x20;
+      case CTF_FRAME_START: // start of a new ctf frame
+        if (chunk[i] == CTF_FRAME_START) {
+          this._ctfState = CTF_PROTOCOL_SIGNATURE;
         } else {
           _logger.error("Error: expecting ctf start byte, received " + chunk[i]);
           // TODO
         }
       break;
 
-      case 0x20: // ctf protocol signature
-        if (chunk[i] == 0x20) {
+      case CTF_PROTOCOL_SIGNATURE: // ctf protocol signature
+        if (chunk[i] == CTF_PROTOCOL_SIGNATURE) {
           this._ctfState = 0x021;
           this._payloadSizeBuffer = new Buffer(4);
           this._payloadSizeBytesLeft = 4;
@@ -91,34 +85,30 @@ Client.prototype.deserialize = function (chunk) {
         }
       break;
 
-      case 0x21: // payload size
+      case CTF_PAYLOAD_SIZE: // payload size
         // continute to collect payload size bytes
         this._payloadSizeBuffer[this._payloadSizeBuffer.length - this._payloadSizeBytesLeft--] = chunk[i];
 
         if (this._payloadSizeBytesLeft == 0) {
           // done collecting payload size bytes
-          console.log("ctf payload size buffer = " + this._payloadSizeBuffer);
           var payloadSize = toNum(this._payloadSizeBuffer);
-          console.log("ctf payload size = ", payloadSize);
           this._payloadBuffer = new Buffer(payloadSize);
           this._payloadBytesLeft = payloadSize;
-          this._ctfState = 0x22;
+          this._ctfState = CTF_PAYLOAD;
         }
       break;
 
-      case 0x22: // payload
+      case CTF_PAYLOAD: // payload
         this._payloadBuffer[this._payloadBuffer.length - this._payloadBytesLeft--] = chunk[i];
         if (this._payloadBytesLeft == 0) {
-          console.log("New CTF Message: " + this._payloadBuffer);
-          this._ctfState = 0x03;
+          this._ctfState = CTF_FRAME_END;
         }
       break;
 
-      case 0x03: // end of ctf frame
-        if (chunk[i] == 0x03) {
-          console.log("ctf payload =" + this._payloadBuffer.toString());
+      case CTF_FRAME_END: // end of ctf frame
+        if (chunk[i] == CTF_FRAME_END) {
           this.emit('message', toJSON(this._payloadBuffer.toString()));
-          this._ctfState = 0x04;
+          this._ctfState = CTF_FRAME_START;
         } else {
           console.log("Error: expecting ctf frame end byte, received " + chunk[i]);
           // TODO
@@ -132,7 +122,6 @@ Client.prototype.deserialize = function (chunk) {
  * Sends a command to ctf feed
  */
 Client.prototype.sendCommand = function (cmd) {
-  console.log("sending ctf command: " + cmd);
   this._sock.write(serialize(cmd));
 }
 
@@ -151,10 +140,10 @@ function serialize (str) {
 		  ctfmsg = new Buffer(msglen + 7); //1 STX, 1 PROTO SIG, 4 LEN, 1 ETX
 
 	// start of the frame - 1 byte
-	ctfmsg[0] = FRAME_START;
+	ctfmsg[0] = CTF_FRAME_START;
 
 	// protocol version - 1 byte
-	ctfmsg[1] = PROTOCOL_SIGNATURE;
+	ctfmsg[1] = CTF_PROTOCOL_SIGNATURE;
 
 	// lenght of the payload - 4 bytes
 	to32Bits(msglen).copy(ctfmsg, 2, 0, 4);
@@ -162,7 +151,7 @@ function serialize (str) {
 	// payload
 	ctfmsg.write(str, 6, 'ascii');
 
-	ctfmsg[ctfmsg.length-1] = FRAME_END;
+	ctfmsg[ctfmsg.length-1] = CTF_FRAME_END;
 
 	return ctfmsg;
 }

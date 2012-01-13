@@ -12,17 +12,13 @@ var net = require('net'),
     util = require('util'), 
     myutil = require('./util'),
     
-  	MPF_FRAME_START = exports.MPF_FRAME_START = 0x02,         // start of transmission
-  	MPF_FRAME_END = exports.MPF_FRAME_END = 0x03,             // end of transmission
-  	MPF_LRC = 1,                                              // lrc
-  	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5 = 0x25,     // packet type 5
-  	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2 = 0x22,     // packet type 2
+  	MPF_FRAME_START = exports.MPF_FRAME_START         = 0x02, // start of transmission
+  	MPF_FRAME_END = exports.MPF_FRAME_END             = 0x03, // end of transmission
+  	MPF_LRC = exports.MPF_LRC                         = 1,    // lrc
+  	MPF_PACKET_TYPE_5 = exports.MPF_PACKET_TYPE_5     = 0x25, // packet type 5
+  	MPF_PACKET_TYPE_2 = exports.MPF_PACKET_TYPE_2     = 0x22, // packet type 2
   	MPF_PACKET_TYPE_ACK = exports.MPF_PACKET_TYPE_ACK = 0x06, // positive acknowledgement packet
   	MPF_PACKET_TYPE_NAK = exports.MPF_PACKET_TYPE_NAK = 0x15; // negative acknowledgement packet
-
-/*
- * MPF Client class
- */
 
 /**
  * MPF Client constructor
@@ -57,7 +53,7 @@ exports.createClient = function (stream) {
 
   // initialize feed parser
   stream.on('data', function (chunk) {
-    console.log("data is received from mpf stream <= " + chunk.toString('hex'));
+    //console.log("data is received from mpf stream <= " + chunk.toString('hex'));
     c.deserialize(chunk);
   });
 
@@ -74,7 +70,6 @@ exports.createClient = function (stream) {
  * @access public
  */
 Client.prototype.sendPacket = function(data) {
-  console.log("sendPacket: " + JSON.stringify(data));
   var self = this,
       buf = null;
 
@@ -93,7 +88,6 @@ Client.prototype.sendPacket = function(data) {
   }
   
   if (buf) {
-    console.log("sendPacket: buf: <" + buf.toString('hex') + ">");
     self._sock.write(buf);
   }
 }
@@ -152,16 +146,13 @@ function createType2Packet (data) {
   buf.write(data.SecurityIDType, offset++, 1, 'ascii');                            // security identifier type
 
   var securityid = myutil.ljust(data.SecurityID, ' ', 12);
-  //console.log("security identifier = <" + securityid + ">");
   buf.write(securityid, offset, 12, 'ascii');                         // security identifier
   offset += 12;
 
   buf.write("%02d".printf(data.Transactions.length), offset);                              // number of instances or tansactions
   offset += 2;
 
-  console.log("createType2Packet: Transactions: " + JSON.stringify(data.Transactions));
   data.Transactions.forEach (function(item) {
-    console.log("createType2Packet: item: " + JSON.stringify(item));
     buf.write(item.Type, offset++, 1, 'ascii');                            // transaction type
     var val = myutil.rjust(item.Value, ' ', 14);
     buf.write(val, offset, 14, 'ascii');                              // data
@@ -270,11 +261,9 @@ function toJSON (buf) {
  * @access public
  */
 Client.prototype.deserialize = function (buf) {
-  console.log("deserialize: " + buf.toString('hex'));
   for (var i = 0; i < buf.length; i++) {
     switch (this._state) {
       case MPF_FRAME_START:
-        console.log("mpf frame start");
         if (buf[i] == MPF_FRAME_START) {
           this._state = MPF_FRAME_END;
           this._packet = [];
@@ -285,17 +274,14 @@ Client.prototype.deserialize = function (buf) {
       break;
       
       case MPF_FRAME_END:
-      console.log("mpf frame end");
         if (buf[i] == MPF_FRAME_END) {
           this._state = MPF_LRC;
         }        
       break;
 
       case MPF_LRC:
-        console.log("mpf lrc");
         lrc = myutil.computeLRC(this._packet, 1, this._packet.length-1);
         if (buf[i] == lrc) {
-          console.log("emtting packet event for new mpf packet: " + JSON.stringify(toJSON(this._packet)));
           this.emit('packet', toJSON(this._packet));
           this._state = MPF_FRAME_START;
         } else {
