@@ -17,9 +17,9 @@ var server = net.createServer(function (stream) {
       // send ack
       var seqno = packet.SeqNo;
       if (seqno) {
-        var type = mpf.MPF_PACKET_TYPE_ACK;
+        var type = mpf.MPF_PACKET_TYPE_NAK;
         packet = { PacketType: type, SeqNo: seqno };
-        console.log("sending ack packet: " + JSON.stringify(packet));
+        console.log("sending packet: " + JSON.stringify(packet));
         mpfClient.sendPacket(packet);
         windowsize = 7;
       }

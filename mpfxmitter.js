@@ -19,7 +19,7 @@ var _logger = new (winston.Logger)({
     }),
     new (winston.transports.File)({ 
       levels: winston.config.syslog.levels, 
-      level: 'debug', 
+      level: 'info', 
       timestamp: true, 
       json: false, 
       filename: './mpf.log' 
@@ -118,7 +118,11 @@ var _recvQueue = [],
     _ctfClient = null,
     
     // global nak count
-    _nakCount = 0;
+    _nakCount = 0,
+    
+    // global reset flag, if true, waiting for reset ack
+    _reset = false;
+    
 
 // Initialize MPF Connection
 initMPF();
@@ -237,12 +241,14 @@ function processNak(seqno) {
   clearTimeout(_timeoutId);
   _logger.debug("processNak: Timeout cleared");
   
-  if (++_nakCount == _mpfNakLimit) {
+  if (++_nakCount == _prop.mpf.naklimit) {
     // nak count exceeded max allowed limit
+    _logger.info("processNak: Naks exceeded allowed limit, reset");
     resetSeqNo();
     sendReset();
     _nakCount = 0;
   } else {
+    _logger.info("processNak: Nak count: " + _nakCount);
     // adjust the send queue window
     adjustSendWindow(prevSeqNo(seqno));
     
@@ -267,12 +273,12 @@ function adjustSendWindow(seqno) {
   }
 }
 
-var _reset = false;
 function sendReset() {
   // send a reset packet with seqno 32
   _logger.info("sendReset: sending reset packet");
-  var buf = mpf.createResetPacket();
-  _mpfsock.write(buf);
+  var packet = {};
+  packet.PacketType = mpf.MPF_PACKET_TYPE_RESET;
+  _mpfClient.sendPacket(packet);
   _reset = true;
 }
 
